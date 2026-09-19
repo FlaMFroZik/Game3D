@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "map/gen.h"
+#include "map/map.h"
 #include "physics/physics.h"
 #include "render/glx.h"
 #include "render/render.h"
@@ -34,10 +35,13 @@ static void read_input(PlayerInput *in) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <texture-file>\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        fprintf(stderr, "Usage: %s <texture-file> [map-file]\n", argv[0]);
         return 1;
     }
+
+    const char *texture_file = argv[1];
+    const char *map_file = (argc >= 3) ? argv[2] : NULL;
 
     GlxWindow window;
     if (!glx_init(&window, WINDOW_WIDTH, WINDOW_HEIGHT, "Game3D")) {
@@ -45,14 +49,21 @@ int main(int argc, char **argv) {
     }
 
     Renderer renderer;
-    if (!render_init(&renderer, argv[1])) {
-        fprintf(stderr, "Failed to load texture: %s\n", argv[1]);
+    if (!render_init(&renderer, texture_file)) {
+        fprintf(stderr, "Failed to load texture: %s\n", texture_file);
         render_shutdown(&renderer);
         glx_shutdown(&window);
         return 1;
     }
 
     render_setup_gl();
+
+    map_init();
+    if (map_file) {
+        if (!map_load(map_file)) {
+            printf("Fallback to procedural terrain generation.\n");
+        }
+    }
 
     gen_init();
 
@@ -102,6 +113,7 @@ int main(int argc, char **argv) {
     }
 
     render_shutdown(&renderer);
+    map_free();
     glx_shutdown(&window);
     return 0;
 }

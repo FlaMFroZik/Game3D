@@ -1,4 +1,5 @@
-#include "gen.h"
+#include "map/gen.h"
+#include "map/map.h"
 #include "physics/physics.h"
 #include "render/prim.h"
 #include "render/render.h"
@@ -70,6 +71,10 @@ void render_world(const Renderer *r, const Player *player) {
 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, r->texture);
+
+    if (map_is_custom()) {
+        map_render();
+    }
 
     for (int i = 0; i < gen_chunk_count(); i++) {
         const Chunk *c = gen_chunk_at(i);

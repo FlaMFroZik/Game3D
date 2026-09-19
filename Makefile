@@ -1,7 +1,7 @@
 # Game3D — сборка
 #
 #   make           — собрать ./game3d
-#   make run       — собрать и запустить (TEXTURE=... — путь к текстуре)
+#   make run       — собрать и запустить (TEXTURE=... MAP=... — пути)
 #   make asan      — пересобрать с AddressSanitizer/UBSan
 #   make clean     — удалить build/ и бинарник
 #
@@ -10,6 +10,7 @@
 TARGET  := game3d
 BUILD   := build
 TEXTURE ?= texture.raw
+MAP     ?=
 
 CC      ?= cc
 CFLAGS  ?= -O2
@@ -17,7 +18,8 @@ CFLAGS  += -std=c11 -Wall -Wextra -I.
 LDLIBS  := -lGLU -lGL -lX11 -lm
 
 SRC := main.c \
-       gen.c \
+       map/gen.c \
+       map/map.c \
        image.c \
        render/prim.c \
        render/glx.c \
@@ -42,7 +44,7 @@ $(BUILD)/%.o: %.c
 	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 run: $(TARGET)
-	./$(TARGET) $(TEXTURE)
+	./$(TARGET) $(TEXTURE) $(MAP)
 
 asan: clean
 	@$(MAKE) --no-print-directory CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined"
