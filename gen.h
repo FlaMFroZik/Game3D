@@ -18,13 +18,37 @@
 #define GEN_MAX_CHUNKS           256    /* размер пула чанков */
 #define GEN_MAX_CHUNKS_PER_FRAME 8      /* сколько чанков максимум генерируем за кадр */
 #define GEN_TERRAIN_OFFSET       1.0f   /* подъём рельефа над y = 0 */
-#define GEN_MAX_HEIGHT           48     /* максимальная высота рельефа в клетках */
-#define GEN_TERRACE_STEP         3      /* высота террасы в клетках */
+
+/* ---------- Высота и её квант ----------
+ * Высота узла хранится не «в клетках», а в квантах: GEN_HEIGHT_SUBDIV
+ * квантов на клетку. При кванте в целую клетку любой пологий склон
+ * рассыпался бы на ступени по GEN_CELL_SIZE — заметно на ровном
+ * освещении. Дробный квант делает рельеф гладким, а память та же
+ * (один байт на узел). */
+
+#define GEN_HEIGHT_SUBDIV        8                                /* квантов на клетку */
+#define GEN_HEIGHT_STEP          (GEN_CELL_SIZE / (float)GEN_HEIGHT_SUBDIV) /* метров на квант */
+
+typedef unsigned char GenHeight;  /* запас: GEN_MAX_HEIGHT * GEN_HEIGHT_SUBDIV <= 255 */
+
+/* ---------- Форма рельефа: равнины с холмами ----------
+ * Всё, что измеряется в клетках, — в клетках (одна клетка = GEN_CELL_SIZE). */
+
+#define GEN_MAX_HEIGHT           26     /* верхняя граница рельефа: самый высокий холм */
+#define GEN_NOISE_SCALE          80.0f  /* длина волны крупных форм, т.е. ширина холма */
+#define GEN_PLAINS_CUTOFF        0.48f  /* что ниже — ровная равнина, без холмов */
+#define GEN_PLAINS_GAIN          1.9f   /* как быстро шум после порога превращается в холм */
+#define GEN_PLAIN_ROUGH          5      /* пологие волны равнины, чтобы она не была «столом» */
+#define GEN_RELIEF_FLOOR         0.35f  /* холмы на «пустых» участках (0 = чистая равнина) */
+
+/* Квант рельефа по высоте: 1 — без террас, рельеф гладкий;
+ * 3 и больше — плоские площадки со стенками выше шага игрока. */
+#define GEN_TERRACE_STEP         1
 #define GEN_TERRACE_ROUGH        0      /* разброс высоты внутри террасы, в клетках */
 
 typedef struct {
-    int cx, cz;                                              /* координаты чанка */
-    unsigned char height[GEN_CHUNK_VERTS][GEN_CHUNK_VERTS];  /* высота клетки в клетках */
+    int cx, cz;                                             /* координаты чанка */
+    GenHeight height[GEN_CHUNK_VERTS][GEN_CHUNK_VERTS];     /* высота узла в квантах */
 } Chunk;
 
 /* ---------- Пул чанков ---------- */
@@ -39,10 +63,10 @@ void gen_update_chunks(float cam_x, float cam_z);
 
 /* ---------- Высоты ---------- */
 
-int   gen_cell_height(int wx, int wz);         /* высота клетки в клетках */
+int   gen_cell_height(int wx, int wz);         /* высота клетки, в квантах высоты */
 float gen_sample_height(float x, float z);     /* высота рельефа в мире (билинейно) */
 
-/* Высота угла внутри чанка, lx/lz в [0 .. GEN_CHUNK_SIZE]. */
+/* Высота угла внутри чанка, lx/lz в [0 .. GEN_CHUNK_SIZE], в мировых единицах. */
 float gen_chunk_y(const Chunk *c, int lx, int lz);
 
 /* ---------- Координаты ---------- */
