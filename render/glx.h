@@ -1,5 +1,5 @@
-#ifndef GLX_H
-#define GLX_H
+#ifndef GLX_GAME_H
+#define GLX_GAME_H
 
 /* ------------------------------------------------------------------
  * Окно, контекст OpenGL и ввод — всё, что зависит от X11/GLX.
