@@ -18,6 +18,7 @@ LDLIBS  := -lGLU -lGL -lX11 -lm
 
 SRC := main.c \
        gen.c \
+       image.c \
        render/prim.c \
        render/glx.c \
        render/render.c \
