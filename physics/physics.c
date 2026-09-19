@@ -22,9 +22,10 @@ void phys_view_dir(const Player *p, float *dx, float *dy, float *dz) {
 void phys_update(Player *p, const PlayerInput *in, double dt) {
     float step = (float)dt;
 
-    /* Горизонтальные оси камеры: вперёд — взгляд, вправо — перпендикуляр. */
-    float dir_x, dir_y, dir_z;
-    phys_view_dir(p, &dir_x, &dir_y, &dir_z);
+    /* Горизонтальные оси движения зависят только от yaw: pitch не должен
+     * влиять на скорость ходьбы (иначе при взгляде вверх/вниз идём медленнее). */
+    float dir_x =  sinf(p->yaw);
+    float dir_z = -cosf(p->yaw);
     float right_x = -dir_z;
     float right_z =  dir_x;
 
