@@ -13,11 +13,13 @@ void coll_set_feet_y(float feet_y) {
 }
 
 float coll_ground_height(float x, float z) {
-    float h = gen_sample_height(x, z);
+    /* Карта и процедурная генерация взаимно исключают: если карта
+     * загружена, земля — только вершины её кубов (вне кубов — пол y = 0),
+     * процедурный рельеф в мир не должен просачиваться. */
     if (map_is_custom()) {
-        h = map_ground_height(x, z, s_current_feet_y, h);
+        return map_ground_height(x, z, s_current_feet_y, 0.0f);
     }
-    return h;
+    return gen_sample_height(x, z);
 }
 
 int coll_point_blocked(float px, float pz, float bottom_y) {
