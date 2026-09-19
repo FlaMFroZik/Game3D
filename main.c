@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "gen.h"
+#include "map/gen.h"
 #include "physics/physics.h"
 #include "render/glx.h"
 #include "render/render.h"
