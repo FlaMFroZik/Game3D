@@ -1,7 +1,7 @@
 #include <math.h>
 
 #include "physics/coll.h"
-#include "gen.h"
+#include "map/gen.h"
 
 #define COLL_PROBE_POINTS 8  /* точек по окружности коллайдера */
 
