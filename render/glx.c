@@ -18,7 +18,7 @@ static int key_slot(KeySym ks) {
     switch (ks) {
         case XK_w: case XK_Cyrillic_tse: return GLX_KEY_W;  /* W / Ц */
         case XK_a: case XK_Cyrillic_ef:  return GLX_KEY_A;  /* A / Ф */
-        case XK_s: case XK_Cyrillic_ze:  return GLX_KEY_S;  /* S / Ы */
+        case XK_s: case XK_Cyrillic_yeru: return GLX_KEY_S; /* S / Ы */
         case XK_d: case XK_Cyrillic_ve:  return GLX_KEY_D;  /* D / В */
         case XK_space:                   return GLX_KEY_SPACE;
         case XK_Shift_L: case XK_Shift_R: return GLX_KEY_SHIFT;
