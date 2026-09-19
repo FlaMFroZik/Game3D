@@ -90,7 +90,11 @@ int main(int argc, char **argv) {
             accumulator -= FRAME_DURATION;
         }
 
-        gen_update_chunks(player.x, player.z);
+        /* Генерация — fallback на случай, если карта не загружена;
+         * с кастомной картой чанки не нужны ни рендеру, ни физике. */
+        if (!map_is_custom()) {
+            gen_update_chunks(player.x, player.z);
+        }
 
         int width, height;
         glx_size(&window, &width, &height);

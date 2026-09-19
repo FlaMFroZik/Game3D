@@ -72,32 +72,35 @@ void render_world(const Renderer *r, const Player *player) {
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, r->texture);
 
+    /* Карта и процедурная генерация взаимно исключают: генерация —
+     * fallback, её рисуем только когда карта из файла не загружена,
+     * иначе рельеф накладывается на кубы карты. */
     if (map_is_custom()) {
         map_render();
-    }
+    } else {
+        for (int i = 0; i < gen_chunk_count(); i++) {
+            const Chunk *c = gen_chunk_at(i);
 
-    for (int i = 0; i < gen_chunk_count(); i++) {
-        const Chunk *c = gen_chunk_at(i);
+            /* рисуем только чанки в радиусе видимости */
+            if (c->cx < pcx - GEN_VIEW_RADIUS || c->cx > pcx + GEN_VIEW_RADIUS) continue;
+            if (c->cz < pcz - GEN_VIEW_RADIUS || c->cz > pcz + GEN_VIEW_RADIUS) continue;
 
-        /* рисуем только чанки в радиусе видимости */
-        if (c->cx < pcx - GEN_VIEW_RADIUS || c->cx > pcx + GEN_VIEW_RADIUS) continue;
-        if (c->cz < pcz - GEN_VIEW_RADIUS || c->cz > pcz + GEN_VIEW_RADIUS) continue;
+            for (int x = 0; x < GEN_CHUNK_SIZE; x++) {
+                for (int z = 0; z < GEN_CHUNK_SIZE; z++) {
+                    CellQuad quad;
 
-        for (int x = 0; x < GEN_CHUNK_SIZE; x++) {
-            for (int z = 0; z < GEN_CHUNK_SIZE; z++) {
-                CellQuad quad;
+                    quad.x0 = (float)(c->cx * GEN_CHUNK_SIZE + x) * GEN_CELL_SIZE;
+                    quad.z0 = (float)(c->cz * GEN_CHUNK_SIZE + z) * GEN_CELL_SIZE;
+                    quad.x1 = quad.x0 + GEN_CELL_SIZE;
+                    quad.z1 = quad.z0 + GEN_CELL_SIZE;
 
-                quad.x0 = (float)(c->cx * GEN_CHUNK_SIZE + x) * GEN_CELL_SIZE;
-                quad.z0 = (float)(c->cz * GEN_CHUNK_SIZE + z) * GEN_CELL_SIZE;
-                quad.x1 = quad.x0 + GEN_CELL_SIZE;
-                quad.z1 = quad.z0 + GEN_CELL_SIZE;
+                    quad.y00 = gen_chunk_y(c, x,     z);
+                    quad.y10 = gen_chunk_y(c, x + 1, z);
+                    quad.y01 = gen_chunk_y(c, x,     z + 1);
+                    quad.y11 = gen_chunk_y(c, x + 1, z + 1);
 
-                quad.y00 = gen_chunk_y(c, x,     z);
-                quad.y10 = gen_chunk_y(c, x + 1, z);
-                quad.y01 = gen_chunk_y(c, x,     z + 1);
-                quad.y11 = gen_chunk_y(c, x + 1, z + 1);
-
-                prim_draw_cell(&quad);
+                    prim_draw_cell(&quad);
+                }
             }
         }
     }
