@@ -1,0 +1,5 @@
+build/
+game3d
+*.o
+*.d
+*.raw
