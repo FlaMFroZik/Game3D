@@ -8,6 +8,10 @@
  * Рельеф строится детерминированным value-noise: высота клетки
  * определена в любой точке мира, а не только в загруженных чанках.
  * Поэтому выгрузка и повторная генерация чанка дают тот же рельеф.
+ *
+ * Форма рельефа — равнины с пологими холмами (см. terrain_shape),
+ * высота хранится дробными квантами (см. GEN_HEIGHT_STEP), чтобы
+ * пологие склоны не рассыпались на ступени в целую клетку.
  * ------------------------------------------------------------------ */
 
 #define GEN_SEED 0x51ED270Bu
@@ -28,7 +32,15 @@ static float hash01(int x, int y) {
 }
 
 static float smooth01(float t) {
-    return t * t * (3.0f - 2.0f * t);
+    /* Квинтический smootherstep: C2 в узлах решётки, поэтому на стыках
+     * октав нет заметных изломов — холмы получаются округлыми. */
+    return t * t * t * (t * (6.0f * t - 15.0f) + 10.0f);
+}
+
+static float clamp01(float v) {
+    if (v < 0.0f) return 0.0f;
+    if (v > 1.0f) return 1.0f;
+    return v;
 }
 
 /* Плавный шум в узлах целочисленной решётки. */
@@ -48,36 +60,85 @@ static float value_noise(float x, float y) {
     return nx0 + (nx1 - nx0) * ty;
 }
 
-/* Высота клетки в клетках: три октавы шума, 0 .. GEN_MAX_HEIGHT.
+/* ---------- Форма рельефа ---------- */
+
+#define GEN_MAX_HEIGHT_Q   (GEN_MAX_HEIGHT * GEN_HEIGHT_SUBDIV)
+#define GEN_TERRACE_Q      (GEN_TERRACE_STEP * GEN_HEIGHT_SUBDIV)
+#define GEN_TERRACE_ROUGH_Q (GEN_TERRACE_ROUGH * GEN_HEIGHT_SUBDIV)
+
+/* Высота клетки в клетках, 0 .. GEN_MAX_HEIGHT (float — до квантования).
  *
- * Шум округляется до террас (GEN_TERRACE_STEP клеток) — получаются
- * плоские площадки со стенками выше шага игрока (COLL_STEP_HEIGHT),
- * то есть рельеф, для которого и написаны коллизии: где-то пройти
- * можно, где-то нужно прыгать. При GEN_TERRACE_ROUGH > 0 внутри
- * террасы добавляется неровность, чтобы площадки не были идеально
- * плоскими. */
+ * Рельеф — «равнины с холмами», а не горы; для этого шум проходит через
+ * три приёма:
+ *
+ *  1. Октавы с большой длиной волны (GEN_NOISE_SCALE клеток) и быстро
+ *     убывающими весами 1 / 0.45 / 0.2: мелких зубцов почти не остаётся,
+ *     склоны становятся пологими.
+ *  2. Всё, что ниже GEN_PLAINS_CUTOFF, обрезается в один уровень — это
+ *     ровные равнины. smoothstep зануляет производную на пороге, поэтому
+ *     холм вырастает из равнины плавно, без излома и без стены; крутизну
+ *     подъёма задаёт GEN_PLAINS_GAIN.
+ *  3. Низкочастотный множитель relief собирает холмы в группы и оставляет
+ *     между ними пустые пространства. GEN_RELIEF_FLOOR — сколько холмов
+ *     остаётся на «пустых» участках (0 = местами абсолютная равнина).
+ *
+ * Основание равнины не идеально плоское: GEN_PLAIN_ROUGH клеток самого
+ * длинного шума дают лёгкую раскачку, иначе равнина выглядит столом.
+ *
+ * Террасы — отдельный приём, выключенный по умолчанию: при
+ * GEN_TERRACE_STEP == 1 рельеф гладкий, при 3 и больше возвращаются
+ * плоские площадки со стенками (под них и написаны коллизии,
+ * COLL_STEP_HEIGHT). */
+static float terrain_shape(int wx, int wz) {
+    const float fx = (float)wx;
+    const float fz = (float)wz;
+    const float s = 1.0f / GEN_NOISE_SCALE;
+
+    /* 1) пологий fBm */
+    float n = value_noise(fx * s,          fz * s)
+            + 0.45f * value_noise(fx * 2.0f * s, fz * 2.0f * s)
+            + 0.20f * value_noise(fx * 4.0f * s, fz * 4.0f * s);
+    n *= 1.0f / 1.65f;
+
+    /* 2) равнина/холм: нижняя часть шума срезается, выход сглажен */
+    float hill = smooth01(clamp01((n - GEN_PLAINS_CUTOFF) * GEN_PLAINS_GAIN));
+
+    /* 3) поля холмов и пустое пространство между ними */
+    float m = value_noise(fx * (0.5f * s) + 41.3f, fz * (0.5f * s) - 17.7f);
+    float relief = GEN_RELIEF_FLOOR + (1.0f - GEN_RELIEF_FLOOR) *
+                   smooth01(clamp01((m - 0.35f) * (1.0f / 0.5f)));
+
+    /* раскачка равнины: шум самой большой длины волны, 0 .. GEN_PLAIN_ROUGH */
+    float base = value_noise(fx * (0.8f * s) - 83.1f, fz * (0.8f * s) + 29.7f)
+               + 0.5f * value_noise(fx * 1.6f * s + 13.0f, fz * 1.6f * s - 61.0f);
+    base = clamp01(base * (1.0f / 1.5f));
+
+    return (float)GEN_PLAIN_ROUGH * base
+         + hill * relief * (float)(GEN_MAX_HEIGHT - GEN_PLAIN_ROUGH);
+}
+
+/* Тот же рельеф, но уже в квантах (то, что лежит в Chunk.height). */
 static int raw_cell_height(int wx, int wz) {
-    float fx = (float)wx;
-    float fz = (float)wz;
+    int q = (int)(terrain_shape(wx, wz) * (float)GEN_HEIGHT_SUBDIV + 0.5f);
 
-    float n = value_noise(fx * (1.0f / 32.0f), fz * (1.0f / 32.0f))
-            + 0.5f  * value_noise(fx * (1.0f / 16.0f), fz * (1.0f / 16.0f))
-            + 0.25f * value_noise(fx * (1.0f / 8.0f),  fz * (1.0f / 8.0f));
-    n *= 1.0f / 1.75f;  /* 1 + 0.5 + 0.25 */
+    if (GEN_TERRACE_Q > 1) {
+        q -= q % GEN_TERRACE_Q;  /* плоские площадки-террасы */
 
-    int h = (int)(n * (float)GEN_MAX_HEIGHT);
-    h -= h % GEN_TERRACE_STEP;  /* плоские площадки-террасы */
+        /* Неровность внутри террасы: ±GEN_TERRACE_ROUGH клеток,
+         * то есть меньше шага игрока — на проходимость не влияет. */
+        q += (int)(hash01(wx, wz) * (float)(2 * GEN_TERRACE_ROUGH_Q + 1))
+           - GEN_TERRACE_ROUGH_Q;
+    }
 
-    /* Неровность внутри террасы: ±GEN_TERRACE_ROUGH клеток,
-     * то есть меньше шага игрока — на проходимость не влияет. */
-    h += (int)(hash01(wx, wz) * (float)(2 * GEN_TERRACE_ROUGH + 1)) - GEN_TERRACE_ROUGH;
-
-    if (h < 0) h = 0;
-    if (h > GEN_MAX_HEIGHT) h = GEN_MAX_HEIGHT;
-    return h;
+    if (q < 0) q = 0;
+    if (q > GEN_MAX_HEIGHT_Q) q = GEN_MAX_HEIGHT_Q;
+    return q;
 }
 
 /* ---------- Пул чанков ---------- */
+
+/* Потолок проверяется в квантах: height[] в Chunk — один байт на узел. */
+_Static_assert(GEN_MAX_HEIGHT_Q <= 255, "высота не влезает в GenHeight (см. gen.h)");
 
 static Chunk chunk_pool[GEN_MAX_CHUNKS];
 static int   chunk_count = 0;
@@ -116,7 +177,7 @@ static Chunk *load_chunk(int cx, int cz) {
 
     for (int x = 0; x < GEN_CHUNK_VERTS; x++) {
         for (int z = 0; z < GEN_CHUNK_VERTS; z++) {
-            c->height[x][z] = (unsigned char)raw_cell_height(base_wx + x, base_wz + z);
+            c->height[x][z] = (GenHeight)raw_cell_height(base_wx + x, base_wz + z);
         }
     }
 
@@ -180,7 +241,7 @@ int gen_cell_height(int wx, int wz) {
 }
 
 static float cell_y(int wx, int wz) {
-    return (float)gen_cell_height(wx, wz) * GEN_CELL_SIZE + GEN_TERRAIN_OFFSET;
+    return (float)gen_cell_height(wx, wz) * GEN_HEIGHT_STEP + GEN_TERRAIN_OFFSET;
 }
 
 float gen_sample_height(float x, float z) {
@@ -203,7 +264,7 @@ float gen_chunk_y(const Chunk *c, int lx, int lz) {
     if (lz < 0) lz = 0;
     if (lz > GEN_CHUNK_SIZE) lz = GEN_CHUNK_SIZE;
 
-    return (float)c->height[lx][lz] * GEN_CELL_SIZE + GEN_TERRAIN_OFFSET;
+    return (float)c->height[lx][lz] * GEN_HEIGHT_STEP + GEN_TERRAIN_OFFSET;
 }
 
 /* ---------- Координаты ---------- */
