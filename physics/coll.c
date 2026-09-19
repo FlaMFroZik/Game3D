@@ -2,14 +2,28 @@
 
 #include "physics/coll.h"
 #include "map/gen.h"
+#include "map/map.h"
 
 #define COLL_PROBE_POINTS 8  /* точек по окружности коллайдера */
 
+static float s_current_feet_y = 0.0f;
+
+void coll_set_feet_y(float feet_y) {
+    s_current_feet_y = feet_y;
+}
+
 float coll_ground_height(float x, float z) {
-    return gen_sample_height(x, z);
+    float h = gen_sample_height(x, z);
+    if (map_is_custom()) {
+        h = map_ground_height(x, z, s_current_feet_y, h);
+    }
+    return h;
 }
 
 int coll_point_blocked(float px, float pz, float bottom_y) {
+    if (map_point_blocked(px, pz, bottom_y)) {
+        return 1;
+    }
     float h = coll_ground_height(px, pz);
     return (h - bottom_y > COLL_STEP_HEIGHT);
 }
@@ -45,6 +59,8 @@ int coll_capsule_blocked(float cx, float cz, float feet_y) {
 }
 
 void coll_move(float *x, float *z, float dx, float dz, float feet_y) {
+    coll_set_feet_y(feet_y);
+
     /* Два прохода: сначала X, потом Z — это и даёт скольжение вдоль стены. */
     float new_x = *x + dx;
     if (!coll_capsule_blocked(new_x, *z, feet_y)) {

@@ -40,11 +40,14 @@ void phys_update(Player *p, const PlayerInput *in, double dt) {
 
     /* Ноги на половину высоты коллайдера ниже камеры. */
     float feet_y = p->y - COLL_HEIGHT * 0.5f;
+    coll_set_feet_y(feet_y);
     coll_move(&p->x, &p->z, dx, dz, feet_y);
 
     /* --- Вертикальная физика --- */
 
     /* Земля под игроком уже с учётом горизонтального шага. */
+    feet_y = p->y - COLL_HEIGHT * 0.5f;
+    coll_set_feet_y(feet_y);
     float target_y = coll_ground_height(p->x, p->z) + COLL_HEIGHT * 0.5f;
     int on_ground = (fabsf(p->y - target_y) < COLL_EPSILON);
 
