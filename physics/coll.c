@@ -4,7 +4,7 @@
 #include "map/gen.h"
 #include "map/map.h"
 
-#define COLL_PROBE_POINTS 8  /* точек по окружности коллайдера */
+#define COLL_PROBE_POINTS 16  /* точек по окружности коллайдера */
 
 static float s_current_feet_y = 0.0f;
 
@@ -22,6 +22,24 @@ float coll_ground_height(float x, float z) {
     return gen_sample_height(x, z);
 }
 
+float coll_player_ground_height(float cx, float cz) {
+    if (map_is_custom()) {
+        return map_cylinder_ground_height(cx, cz, COLL_RADIUS, s_current_feet_y, 0.0f);
+    }
+    float highest = gen_sample_height(cx, cz);
+    const float angle_step = 2.0f * 3.14159265f / COLL_PROBE_POINTS;
+    for (int i = 0; i < COLL_PROBE_POINTS; i++) {
+        float angle = (float)i * angle_step;
+        float px = cx + COLL_RADIUS * cosf(angle);
+        float pz = cz + COLL_RADIUS * sinf(angle);
+        float h = gen_sample_height(px, pz);
+        if (h <= s_current_feet_y + COLL_STEP_HEIGHT + COLL_EPSILON && h > highest) {
+            highest = h;
+        }
+    }
+    return highest;
+}
+
 int coll_point_blocked(float px, float pz, float bottom_y) {
     if (map_point_blocked(px, pz, bottom_y)) {
         return 1;
@@ -31,6 +49,10 @@ int coll_point_blocked(float px, float pz, float bottom_y) {
 }
 
 int coll_capsule_blocked(float cx, float cz, float feet_y) {
+    if (map_is_custom()) {
+        return map_capsule_blocked(cx, cz, feet_y);
+    }
+
     const float angle_step = 2.0f * 3.14159265f / COLL_PROBE_POINTS;
     float h_center = coll_ground_height(cx, cz);
 

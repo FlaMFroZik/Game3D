@@ -183,6 +183,12 @@ void map_render(const Texture *tex) {
     }
 }
 
+static float clampf(float v, float min, float max) {
+    if (v < min) return min;
+    if (v > max) return max;
+    return v;
+}
+
 int map_point_blocked(float px, float pz, float bottom_y) {
     if (!g_map.is_loaded) return 0;
 
@@ -201,16 +207,52 @@ int map_point_blocked(float px, float pz, float bottom_y) {
         if (min_y > max_y) { float t = min_y; min_y = max_y; max_y = t; }
 
         if (px >= min_x && px <= max_x && pz >= min_z && pz <= max_z) {
-            /* Стена, если куб выше bottom_y + COLL_STEP_HEIGHT, или если игрок внутри по высоте */
-            if (max_y - bottom_y > COLL_STEP_HEIGHT && bottom_y < max_y) {
-                return 1;
+            /* Стена, если тело игрока пересекает куб по высоте и куб выше шага или нависает */
+            if (bottom_y + COLL_HEIGHT > min_y + COLL_EPSILON && bottom_y < max_y - COLL_EPSILON) {
+                if (max_y - bottom_y > COLL_STEP_HEIGHT || bottom_y < min_y - COLL_EPSILON) {
+                    return 1;
+                }
             }
         }
     }
     return 0;
 }
 
-float map_ground_height(float px, float pz, float current_feet_y, float default_y) {
+int map_capsule_blocked(float cx, float cz, float feet_y) {
+    if (!g_map.is_loaded) return 0;
+
+    for (size_t i = 0; i < g_map.count; i++) {
+        const MapCube *c = &g_map.cubes[i];
+        float min_x = c->x;
+        float max_x = c->x + c->sx;
+        if (min_x > max_x) { float t = min_x; min_x = max_x; max_x = t; }
+
+        float min_z = c->z;
+        float max_z = c->z + c->sz;
+        if (min_z > max_z) { float t = min_z; min_z = max_z; max_z = t; }
+
+        float min_y = c->y;
+        float max_y = c->y + c->sy;
+        if (min_y > max_y) { float t = min_y; min_y = max_y; max_y = t; }
+
+        float nx = clampf(cx, min_x, max_x);
+        float nz = clampf(cz, min_z, max_z);
+        float dx = cx - nx;
+        float dz = cz - nz;
+
+        if (dx * dx + dz * dz < COLL_RADIUS * COLL_RADIUS) {
+            /* Проверяем пересечение цилиндра с кубом по высоте */
+            if (feet_y + COLL_HEIGHT > min_y + COLL_EPSILON && feet_y < max_y - COLL_EPSILON) {
+                if (max_y - feet_y > COLL_STEP_HEIGHT || feet_y < min_y - COLL_EPSILON) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+float map_cylinder_ground_height(float cx, float cz, float radius, float current_feet_y, float default_y) {
     if (!g_map.is_loaded) return default_y;
 
     float highest = default_y;
@@ -225,9 +267,16 @@ float map_ground_height(float px, float pz, float current_feet_y, float default_
         float max_z = c->z + c->sz;
         if (min_z > max_z) { float t = min_z; min_z = max_z; max_z = t; }
 
-        float max_y = (c->sy >= 0) ? (c->y + c->sy) : c->y;
+        float min_y = c->y;
+        float max_y = c->y + c->sy;
+        if (min_y > max_y) { float t = min_y; min_y = max_y; max_y = t; }
 
-        if (px >= min_x && px <= max_x && pz >= min_z && pz <= max_z) {
+        float nx = clampf(cx, min_x, max_x);
+        float nz = clampf(cz, min_z, max_z);
+        float dx = cx - nx;
+        float dz = cz - nz;
+
+        if (dx * dx + dz * dz <= radius * radius) {
             /* Куб считается землей под ногами, если его верх не выше ног + COLL_STEP_HEIGHT */
             if (max_y <= current_feet_y + COLL_STEP_HEIGHT + COLL_EPSILON) {
                 if (max_y > highest) {
@@ -239,3 +288,8 @@ float map_ground_height(float px, float pz, float current_feet_y, float default_
 
     return highest;
 }
+
+float map_ground_height(float px, float pz, float current_feet_y, float default_y) {
+    return map_cylinder_ground_height(px, pz, 0.0f, current_feet_y, default_y);
+}
+

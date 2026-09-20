@@ -21,6 +21,10 @@ void coll_set_feet_y(float feet_y);
 /* Высота земли под точкой мира. */
 float coll_ground_height(float x, float z);
 
+/* Высота земли под коллайдером игрока с центром (cx, cz). */
+float coll_player_ground_height(float cx, float cz);
+
+
 /* Мешает ли рельеф точке на высоте bottom_y. */
 int coll_point_blocked(float px, float pz, float bottom_y);
 

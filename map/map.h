@@ -50,10 +50,18 @@ void map_render(const Texture *tex);
  */
 int map_point_blocked(float px, float pz, float bottom_y);
 
+/* Проверка блокировки цилиндрического коллайдера игрока кубами карты */
+int map_capsule_blocked(float cx, float cz, float feet_y);
+
 /* Высота верхней грани самого высокого куба под точкой (px, pz),
  * находящегося не выше max_y (или вообще под ногами игрока).
  * Если под точкой нет кубов, возвращает default_y.
  */
 float map_ground_height(float px, float pz, float current_feet_y, float default_y);
+
+/* Высота верхней грани самого высокого куба под цилиндром коллайдера (cx, cz, radius).
+ * Если под цилиндром нет кубов, возвращает default_y.
+ */
+float map_cylinder_ground_height(float cx, float cz, float radius, float current_feet_y, float default_y);
 
 #endif /* MAP_H */

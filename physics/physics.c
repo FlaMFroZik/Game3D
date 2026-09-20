@@ -49,7 +49,7 @@ void phys_update(Player *p, const PlayerInput *in, double dt) {
     /* Земля под игроком уже с учётом горизонтального шага. */
     feet_y = p->y - COLL_HEIGHT * 0.5f;
     coll_set_feet_y(feet_y);
-    float target_y = coll_ground_height(p->x, p->z) + COLL_HEIGHT * 0.5f;
+    float target_y = coll_player_ground_height(p->x, p->z) + COLL_HEIGHT * 0.5f;
     int on_ground = (fabsf(p->y - target_y) < COLL_EPSILON);
 
     if (on_ground) {
@@ -60,15 +60,17 @@ void phys_update(Player *p, const PlayerInput *in, double dt) {
 
     float next_y = p->y + p->vel_y * step;
 
-    if (p->vel_y <= 0.0f && next_y <= target_y) {
-        /* Приземление. */
+    if (next_y <= target_y) {
+        /* Приземление или удержание на поверхности. */
         next_y = target_y;
-        p->vel_y = 0.0f;
+        if (p->vel_y < 0.0f) {
+            p->vel_y = 0.0f;
+        }
 
         /* Прыжок, если пробел зажат в момент приземления. */
         if (in->jump) {
             p->vel_y = PHYS_JUMP_FORCE;
-            next_y = p->y + p->vel_y * step;
+            next_y = target_y + p->vel_y * step;
         }
     } else if (on_ground && in->jump) {
         /* Прыжок с земли. */
