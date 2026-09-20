@@ -1,3 +1,6 @@
+#include <GL/gl.h>
+#include <GL/glu.h>
+
 #include "map/gen.h"
 #include "map/map.h"
 #include "physics/physics.h"

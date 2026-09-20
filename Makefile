@@ -5,7 +5,7 @@
 #   make asan      — пересобрать с AddressSanitizer/UBSan
 #   make clean     — удалить build/ и бинарник
 #
-# Зависимости (Debian/Ubuntu): libx11-dev libgl1-mesa-dev libglu1-mesa-dev
+# Зависимости (Debian/Ubuntu): libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev
 
 TARGET  := game3d
 BUILD   := build
@@ -15,14 +15,14 @@ MAP     ?=
 CC      ?= cc
 CFLAGS  ?= -O2
 CFLAGS  += -std=c11 -Wall -Wextra -I.
-LDLIBS  := -lGLU -lGL -lX11 -lm
+LDLIBS  := -lglfw -lGLU -lGL -lm
 
 SRC := main.c \
        map/gen.c \
        map/map.c \
        image.c \
        render/prim.c \
-       render/glx.c \
+       render/window.c \
        render/render.c \
        physics/physics.c \
        physics/coll.c

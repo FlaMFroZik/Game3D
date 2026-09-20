@@ -7,8 +7,8 @@
 #include "map/gen.h"
 #include "map/map.h"
 #include "physics/physics.h"
-#include "render/glx.h"
 #include "render/render.h"
+#include "render/window.h"
 
 /* ---------- Параметры ---------- */
 
@@ -24,14 +24,14 @@ static double get_time(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
-/* Состояние клавиш превращаем в намерения игрока — physics не знает про X11. */
+/* Состояние клавиш превращаем в намерения игрока — physics не знает про GLFW. */
 static void read_input(PlayerInput *in) {
-    in->forward = (float)(glx_key_down(GLX_KEY_W) - glx_key_down(GLX_KEY_S));
-    in->strafe  = (float)(glx_key_down(GLX_KEY_D) - glx_key_down(GLX_KEY_A));
-    in->look_x  = (float)(glx_key_down(GLX_KEY_RIGHT) - glx_key_down(GLX_KEY_LEFT));
-    in->look_y  = (float)(glx_key_down(GLX_KEY_UP) - glx_key_down(GLX_KEY_DOWN));
-    in->jump    = glx_key_down(GLX_KEY_SPACE);
-    in->run     = glx_key_down(GLX_KEY_SHIFT);
+    in->forward = (float)(win_key_down(WIN_KEY_W) - win_key_down(WIN_KEY_S));
+    in->strafe  = (float)(win_key_down(WIN_KEY_D) - win_key_down(WIN_KEY_A));
+    in->look_x  = (float)(win_key_down(WIN_KEY_RIGHT) - win_key_down(WIN_KEY_LEFT));
+    in->look_y  = (float)(win_key_down(WIN_KEY_UP) - win_key_down(WIN_KEY_DOWN));
+    in->jump    = win_key_down(WIN_KEY_SPACE);
+    in->run     = win_key_down(WIN_KEY_SHIFT);
 }
 
 int main(int argc, char **argv) {
@@ -43,8 +43,8 @@ int main(int argc, char **argv) {
     const char *texture_file = argv[1];
     const char *map_file = (argc >= 3) ? argv[2] : NULL;
 
-    GlxWindow window;
-    if (!glx_init(&window, WINDOW_WIDTH, WINDOW_HEIGHT, "Game3D")) {
+    WinWindow window;
+    if (!win_init(&window, WINDOW_WIDTH, WINDOW_HEIGHT, "Game3D")) {
         return 1;
     }
 
@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
     if (!render_init(&renderer, texture_file)) {
         fprintf(stderr, "Failed to load texture: %s\n", texture_file);
         render_shutdown(&renderer);
-        glx_shutdown(&window);
+        win_shutdown(&window);
         return 1;
     }
 
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     double last_time = get_time();
     double accumulator = 0.0;
 
-    while (!glx_poll(&window)) {
+    while (!win_poll(&window)) {
         double frame_start = get_time();
 
         double delta = frame_start - last_time;
@@ -97,13 +97,13 @@ int main(int argc, char **argv) {
         }
 
         int width, height;
-        glx_size(&window, &width, &height);
+        win_size(&window, &width, &height);
 
         render_clear(&renderer);
         render_camera(&renderer, &player, width, height);
         render_world(&renderer, &player);
 
-        glx_swap(&window);
+        win_swap(&window);
 
         /* удержание ~60 FPS даже без вертикальной синхронизации */
         double elapsed = get_time() - frame_start;
@@ -118,6 +118,6 @@ int main(int argc, char **argv) {
 
     render_shutdown(&renderer);
     map_free();
-    glx_shutdown(&window);
+    win_shutdown(&window);
     return 0;
 }
