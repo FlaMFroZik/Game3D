@@ -22,6 +22,9 @@ void win_shutdown(WinWindow *w);
 /* Обрабатывает все накопившиеся события. Возвращает 1, если пора выходить. */
 int win_poll(WinWindow *w);
 
+/* Монотонное время в секундах, одинаковое на Windows и Linux. */
+double win_time_seconds(void);
+
 /* Размер области отрисовки в пикселях (для aspect ratio). */
 void win_size(const WinWindow *w, int *width, int *height);
 

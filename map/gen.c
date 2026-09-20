@@ -113,7 +113,11 @@ static int   chunk_count = 0;
 
 void gen_init(void) {
     chunk_count = 0;
-    GEN_SEED = time(NULL);
+
+    /* time_t имеет разный размер на разных компиляторах; явно сворачиваем
+     * значение в 32-битный seed без предупреждений MSVC/GCC. */
+    uint64_t now = (uint64_t)time(NULL);
+    GEN_SEED = (int)(now ^ (now >> 32));
 }
 
 int gen_chunk_count(void) {

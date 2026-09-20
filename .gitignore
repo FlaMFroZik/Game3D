@@ -1,5 +1,11 @@
 build/
+build-asan/
+cmake-build-*/
+.vs/
+*.user
+*.suo
 game3d
+game3d.exe
 *.o
 *.d
 *.raw

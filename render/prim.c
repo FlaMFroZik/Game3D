@@ -3,7 +3,6 @@
 #include <stdint.h>
 
 #include <GL/gl.h>
-#include <GL/glu.h>
 
 #include "image.h"
 #include "render/prim.h"
@@ -25,10 +24,6 @@ float prim_tex_u(const Texture *tex, float meters) {
 float prim_tex_v(const Texture *tex, float meters) {
     if (tex->height <= 0) return 0.0f;
     return meters * texels_per_meter(tex) / (float)tex->height;
-}
-
-static int is_pow2(int v) {
-    return v > 0 && (v & (v - 1)) == 0;
 }
 
 Texture prim_load_texture(const char *filename) {
@@ -81,22 +76,14 @@ Texture prim_load_texture(const char *filename) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
-    GLenum err = GL_INVALID_VALUE;
-    if (is_pow2(w) && is_pow2(h)) {
-        /* Мипмапы: текстура ложится мелкой плиткой, без них вдали рябит. */
-        err = gluBuild2DMipmaps(GL_TEXTURE_2D, internal, w, h,
-                                format, GL_UNSIGNED_BYTE, pixels);
-    }
-
-    if (err == 0) {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    } else {
-        /* Размер не кратен степени двойки (или GLU не смог) — мипмапов не будет. */
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, internal, w, h, 0,
-                     format, GL_UNSIGNED_BYTE, pixels);
-    }
+    /* RGB-строка не всегда кратна четырём байтам. Явно задаём выравнивание,
+     * иначе драйверы Windows и Linux могут по-разному прочитать текстуру. */
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, internal, w, h, 0,
+                 format, GL_UNSIGNED_BYTE, pixels);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
     free(pixels);
 
