@@ -1,8 +1,4 @@
-/* clock_gettime/nanosleep — POSIX, в строгом -std=c11 без этого макроса скрыты */
-#define _POSIX_C_SOURCE 200809L
-
 #include <stdio.h>
-#include <time.h>
 
 #include "map/gen.h"
 #include "map/map.h"
@@ -14,15 +10,9 @@
 
 #define WINDOW_WIDTH  800
 #define WINDOW_HEIGHT 600
-#define TARGET_FPS    60.0f
-#define FRAME_DURATION (1.0 / TARGET_FPS)
+#define PHYSICS_HZ    60.0
+#define PHYSICS_STEP  (1.0 / PHYSICS_HZ)
 #define MAX_FRAME_DELTA 0.2   /* защита от «скачка» после зависания */
-
-static double get_time(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-}
 
 /* Состояние клавиш превращаем в намерения игрока — physics не знает про GLFW. */
 static void read_input(PlayerInput *in) {
@@ -41,7 +31,7 @@ int main(int argc, char **argv) {
     }
 
     const char *texture_file = argv[1];
-    const char *map_file = (argc >= 3) ? argv[2] : NULL;
+    const char *map_file = (argc >= 3 && argv[2][0] != '\0') ? argv[2] : NULL;
 
     WinWindow window;
     if (!win_init(&window, WINDOW_WIDTH, WINDOW_HEIGHT, "Game3D")) {
@@ -70,24 +60,26 @@ int main(int argc, char **argv) {
     Player player;
     phys_init(&player);
 
-    double last_time = get_time();
+    /* GLFW предоставляет монотонные часы на Windows, Linux и macOS. */
+    double last_time = win_time_seconds();
     double accumulator = 0.0;
 
     while (!win_poll(&window)) {
-        double frame_start = get_time();
+        double frame_start = win_time_seconds();
 
         double delta = frame_start - last_time;
         last_time = frame_start;
 
         if (delta > MAX_FRAME_DELTA) delta = MAX_FRAME_DELTA;
+        if (delta < 0.0) delta = 0.0;
         accumulator += delta;
 
         /* Фиксированный шаг физики: поведение не зависит от FPS. */
-        while (accumulator >= FRAME_DURATION) {
+        while (accumulator >= PHYSICS_STEP) {
             PlayerInput in;
             read_input(&in);
-            phys_update(&player, &in, FRAME_DURATION);
-            accumulator -= FRAME_DURATION;
+            phys_update(&player, &in, PHYSICS_STEP);
+            accumulator -= PHYSICS_STEP;
         }
 
         /* Генерация — fallback на случай, если карта не загружена;
@@ -104,16 +96,6 @@ int main(int argc, char **argv) {
         render_world(&renderer, &player);
 
         win_swap(&window);
-
-        /* удержание ~60 FPS даже без вертикальной синхронизации */
-        double elapsed = get_time() - frame_start;
-        if (elapsed < FRAME_DURATION) {
-            struct timespec rest = {0, 0};
-            double seconds = FRAME_DURATION - elapsed;
-            rest.tv_sec = (time_t)seconds;
-            rest.tv_nsec = (long)((seconds - (double)rest.tv_sec) * 1e9);
-            nanosleep(&rest, NULL);
-        }
     }
 
     render_shutdown(&renderer);

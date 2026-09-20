@@ -1,5 +1,6 @@
+#include <math.h>
+
 #include <GL/gl.h>
-#include <GL/glu.h>
 
 #include "map/gen.h"
 #include "map/map.h"
@@ -7,11 +8,57 @@
 #include "render/prim.h"
 #include "render/render.h"
 
+#define RENDER_PI 3.14159265358979323846
+
 /* ------------------------------------------------------------------
- * Матрицы задаются фиксированным конвейером (glMatrixMode/gluPerspective/
- * gluLookAt), шейдеров нет — менять эту часть можно без правок остальных
- * модулей.
+ * Матрицы задаются фиксированным конвейером (glMatrixMode/glFrustum),
+ * шейдеров нет — менять эту часть можно без правок остальных модулей.
  * ------------------------------------------------------------------ */
+
+static void render_perspective(GLdouble fov, GLdouble aspect,
+                               GLdouble near_plane, GLdouble far_plane) {
+    const GLdouble half_angle = fov * RENDER_PI / 360.0;
+    const GLdouble top = near_plane * tan(half_angle);
+    const GLdouble right = top * aspect;
+
+    glFrustum(-right, right, -top, top, near_plane, far_plane);
+}
+
+/* Замена gluLookAt без зависимости от GLU. Направление взгляда уже единичное
+ * (его создаёт phys_view_dir), поэтому здесь нужен только базис камеры. */
+static void render_look_at(float eye_x, float eye_y, float eye_z,
+                           float forward_x, float forward_y, float forward_z) {
+    const float up_x = 0.0f;
+    const float up_y = 1.0f;
+    const float up_z = 0.0f;
+
+    /* side = forward x up */
+    float side_x = forward_y * up_z - forward_z * up_y;
+    float side_y = forward_z * up_x - forward_x * up_z;
+    float side_z = forward_x * up_y - forward_y * up_x;
+    float side_length = sqrtf(side_x * side_x + side_y * side_y + side_z * side_z);
+    if (side_length < 1e-6f) return;
+
+    side_x /= side_length;
+    side_y /= side_length;
+    side_z /= side_length;
+
+    /* camera_up = side x forward */
+    const float camera_up_x = side_y * forward_z - side_z * forward_y;
+    const float camera_up_y = side_z * forward_x - side_x * forward_z;
+    const float camera_up_z = side_x * forward_y - side_y * forward_x;
+
+    const GLdouble matrix[16] = {
+        side_x,       camera_up_x,       -forward_x,       0.0,
+        side_y,       camera_up_y,       -forward_y,       0.0,
+        side_z,       camera_up_z,       -forward_z,       0.0,
+        -(side_x * eye_x + side_y * eye_y + side_z * eye_z),
+        -(camera_up_x * eye_x + camera_up_y * eye_y + camera_up_z * eye_z),
+          forward_x * eye_x + forward_y * eye_y + forward_z * eye_z,
+        1.0
+    };
+    glMultMatrixd(matrix);
+}
 
 int render_init(Renderer *r, const char *texture_file) {
     r->sky[0] = 0.45f;
@@ -53,17 +100,14 @@ void render_camera(const Renderer *r, const Player *player, int width, int heigh
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(r->fov, (double)aspect, r->near_plane, r->far_plane);
+    render_perspective(r->fov, (GLdouble)aspect, r->near_plane, r->far_plane);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
     float dir_x, dir_y, dir_z;
     phys_view_dir(player, &dir_x, &dir_y, &dir_z);
-
-    gluLookAt(player->x, player->y, player->z,
-              player->x + dir_x, player->y + dir_y, player->z + dir_z,
-              0.0f, 1.0f, 0.0f);
+    render_look_at(player->x, player->y, player->z, dir_x, dir_y, dir_z);
 }
 
 void render_world(const Renderer *r, const Player *player) {

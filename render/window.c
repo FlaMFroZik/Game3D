@@ -9,16 +9,10 @@ static int button_state[8];
 static int quit_requested = 0;
 static int glfw_ready = 0;
 
-/* GLFW 3.4 переделала API ошибок (glfwGetErrorString убрана), поддерживаем
- * обе версии: так собирается и против 3.3 из репозиториев Debian/Ubuntu. */
 static const char *glfw_error_string(void) {
-#if GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR < 4
-    return glfwGetErrorString(glfwGetError());
-#else
-    const char *err = NULL;
-    glfwGetError(&err);
-    return err ? err : "unknown error";
-#endif
+    const char *description = NULL;
+    glfwGetError(&description);
+    return description ? description : "unknown error";
 }
 
 /* ---------- Клавиши ---------- */
@@ -73,9 +67,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     memset(key_state, 0, sizeof(key_state));
     memset(button_state, 0, sizeof(button_state));
     quit_requested = 0;
-
-    glfwWindowHint(GLFW_DEPTH_BITS, 24);
-    glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+    glfw_ready = 0;
 
     if (!glfwInit()) {
         fprintf(stderr, "Cannot initialize GLFW: %s\n", glfw_error_string());
@@ -83,9 +75,12 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     }
     glfw_ready = 1;
 
-    /* Рендер использует фиксированный конвейер (glBegin/gluPerspective),
+    glfwWindowHint(GLFW_DEPTH_BITS, 24);
+    glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+
+    /* Рендер использует фиксированный конвейер (glBegin/glMatrixMode),
      * поэтому просим совместимый профиль 3.3. Если драйвер его не даст —
-     * откат на «обычный» (legacy) контекст, как было при X11/GLX. */
+     * откат на «обычный» legacy-контекст. */
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
@@ -93,6 +88,8 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
 
     if (!w->window) {
         glfwDefaultWindowHints();
+        glfwWindowHint(GLFW_DEPTH_BITS, 24);
+        glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
         w->window = glfwCreateWindow(width, height, title, NULL, NULL);
         if (!w->window) {
             fprintf(stderr, "Cannot create window: %s\n", glfw_error_string());
@@ -102,6 +99,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     }
 
     glfwMakeContextCurrent(w->window);
+    glfwSwapInterval(1); /* одинаковое ограничение частоты кадров на обеих ОС */
 
     glfwSetKeyCallback(w->window, key_callback);
     glfwSetMouseButtonCallback(w->window, mouse_button_callback);
@@ -126,6 +124,10 @@ int win_poll(WinWindow *w) {
         return 1;
     }
     return quit_requested;
+}
+
+double win_time_seconds(void) {
+    return glfwGetTime();
 }
 
 void win_size(const WinWindow *w, int *width, int *height) {

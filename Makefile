@@ -1,55 +1,41 @@
-# Game3D — сборка
+# Удобная обёртка над CMake. Сам CMake остаётся кроссплатформенным
+# и одинаково работает с Visual Studio, MinGW и GCC/Clang.
 #
-#   make           — собрать ./game3d
-#   make run       — собрать и запустить (TEXTURE=... MAP=... — пути)
-#   make asan      — пересобрать с AddressSanitizer/UBSan
-#   make clean     — удалить build/ и бинарник
-#
-# Зависимости (Debian/Ubuntu): libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev
+#   make           — сконфигурировать и собрать Release
+#   make run       — собрать и запустить (TEXTURE=... MAP=...)
+#   make asan      — сборка с AddressSanitizer/UBSan (GCC/Clang)
+#   make clean     — удалить каталог сборки
 
-TARGET  := game3d
-BUILD   := build
+BUILD_DIR ?= build
+CONFIG ?= Release
+CMAKE ?= cmake
 TEXTURE ?= texture.raw
-MAP     ?=
+MAP ?=
 
-CC      ?= cc
-CFLAGS  ?= -O2
-CFLAGS  += -std=c11 -Wall -Wextra -I.
-LDLIBS  := -lglfw -lGLU -lGL -lm
+ifeq ($(OS),Windows_NT)
+  EXE := .exe
+  # Visual Studio uses build/Release; MinGW is single-config and uses build/.
+  CONFIG_DIR ?= $(CONFIG)/
+else
+  EXE :=
+  CONFIG_DIR ?=
+endif
 
-SRC := main.c \
-       map/gen.c \
-       map/map.c \
-       image.c \
-       render/prim.c \
-       render/window.c \
-       render/render.c \
-       physics/physics.c \
-       physics/coll.c
+.PHONY: all configure run asan clean
 
-OBJ := $(SRC:%.c=$(BUILD)/%.o)
-DEP := $(OBJ:.o=.d)
+all: configure
+	$(CMAKE) --build $(BUILD_DIR) --config $(CONFIG)
 
-.PHONY: all run asan clean
+configure:
+	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(CONFIG)
 
-all: $(TARGET)
+run: all
+	$(BUILD_DIR)/$(CONFIG_DIR)game3d$(EXE) $(TEXTURE) $(MAP)
 
-$(TARGET): $(OBJ)
-	@echo "  LD  $@"
-	@$(CC) $(OBJ) $(LDFLAGS) $(LDLIBS) -o $@
-
-$(BUILD)/%.o: %.c
-	@mkdir -p $(dir $@)
-	@echo "  CC  $<"
-	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
-
-run: $(TARGET)
-	./$(TARGET) $(TEXTURE) $(MAP)
-
-asan: clean
-	@$(MAKE) --no-print-directory CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined"
+asan:
+	$(CMAKE) -S . -B $(BUILD_DIR)-asan -DCMAKE_BUILD_TYPE=Debug -DGAME3D_SANITIZERS=ON
+	$(CMAKE) --build $(BUILD_DIR)-asan --config Debug
 
 clean:
-	@rm -rf $(BUILD) $(TARGET)
-
--include $(DEP)
+	$(CMAKE) -E remove_directory $(BUILD_DIR)
+	$(CMAKE) -E remove_directory $(BUILD_DIR)-asan
