@@ -7,8 +7,8 @@
 
 #include <GL/gl.h>
 
-#include "render/glx.h"
 #include "render/prim.h"
+#include "render/window.h"
 
 #define RENDER_FOV        60.0   /* угол обзора по вертикали, градусы */
 #define RENDER_NEAR       0.1

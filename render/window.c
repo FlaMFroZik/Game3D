@@ -1,0 +1,137 @@
+#include <stdio.h>
+#include <string.h>
+
+#include "render/window.h"
+
+static int key_state[WIN_KEY_COUNT];
+static int button_state[8];
+
+static int quit_requested = 0;
+static int glfw_ready = 0;
+
+/* GLFW 3.4 переделала API ошибок (glfwGetErrorString убрана), поддерживаем
+ * обе версии: так собирается и против 3.3 из репозиториев Debian/Ubuntu. */
+static const char *glfw_error_string(void) {
+#if GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR < 4
+    return glfwGetErrorString(glfwGetError());
+#else
+    const char *err = NULL;
+    glfwGetError(&err);
+    return err ? err : "unknown error";
+#endif
+}
+
+/* ---------- Клавиши ---------- */
+
+static int key_slot(int key) {
+    switch (key) {
+        case GLFW_KEY_W:    return WIN_KEY_W;
+        case GLFW_KEY_A:    return WIN_KEY_A;
+        case GLFW_KEY_S:    return WIN_KEY_S;
+        case GLFW_KEY_D:    return WIN_KEY_D;
+        case GLFW_KEY_SPACE: return WIN_KEY_SPACE;
+        case GLFW_KEY_LEFT_SHIFT:
+        case GLFW_KEY_RIGHT_SHIFT: return WIN_KEY_SHIFT;
+        case GLFW_KEY_UP:   return WIN_KEY_UP;
+        case GLFW_KEY_DOWN: return WIN_KEY_DOWN;
+        case GLFW_KEY_LEFT: return WIN_KEY_LEFT;
+        case GLFW_KEY_RIGHT: return WIN_KEY_RIGHT;
+        default:            return -1;
+    }
+}
+
+static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
+    (void)window; (void)scancode; (void)mods;
+    int slot = key_slot(key);
+    if (slot >= 0) key_state[slot] = (action != GLFW_RELEASE);
+    if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
+        quit_requested = 1;
+    }
+}
+
+static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
+    (void)window; (void)mods;
+    if (button >= 0 && button < (int)sizeof(button_state)) {
+        button_state[button] = (action != GLFW_RELEASE);
+    }
+}
+
+int win_key_down(WinKey key) {
+    if (key < 0 || key >= WIN_KEY_COUNT) return 0;
+    return key_state[key];
+}
+
+int win_button_down(int button) {
+    if (button < 0 || button >= (int)sizeof(button_state)) return 0;
+    return button_state[button];
+}
+
+/* ---------- Окно ---------- */
+
+int win_init(WinWindow *w, int width, int height, const char *title) {
+    memset(w, 0, sizeof(*w));
+    memset(key_state, 0, sizeof(key_state));
+    memset(button_state, 0, sizeof(button_state));
+    quit_requested = 0;
+
+    glfwWindowHint(GLFW_DEPTH_BITS, 24);
+    glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+
+    if (!glfwInit()) {
+        fprintf(stderr, "Cannot initialize GLFW: %s\n", glfw_error_string());
+        return 0;
+    }
+    glfw_ready = 1;
+
+    /* Рендер использует фиксированный конвейер (glBegin/gluPerspective),
+     * поэтому просим совместимый профиль 3.3. Если драйвер его не даст —
+     * откат на «обычный» (legacy) контекст, как было при X11/GLX. */
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
+    w->window = glfwCreateWindow(width, height, title, NULL, NULL);
+
+    if (!w->window) {
+        glfwDefaultWindowHints();
+        w->window = glfwCreateWindow(width, height, title, NULL, NULL);
+        if (!w->window) {
+            fprintf(stderr, "Cannot create window: %s\n", glfw_error_string());
+            win_shutdown(w);
+            return 0;
+        }
+    }
+
+    glfwMakeContextCurrent(w->window);
+
+    glfwSetKeyCallback(w->window, key_callback);
+    glfwSetMouseButtonCallback(w->window, mouse_button_callback);
+    return 1;
+}
+
+void win_shutdown(WinWindow *w) {
+    if (w->window) {
+        glfwDestroyWindow(w->window);
+        w->window = NULL;
+    }
+    if (glfw_ready) {
+        glfwTerminate();
+        glfw_ready = 0;
+    }
+}
+
+int win_poll(WinWindow *w) {
+    glfwPollEvents();
+    /* Кнопка «закрыть» оконного менеджера тоже должна завершать игру. */
+    if (w->window && glfwWindowShouldClose(w->window)) {
+        return 1;
+    }
+    return quit_requested;
+}
+
+void win_size(const WinWindow *w, int *width, int *height) {
+    glfwGetFramebufferSize(w->window, width, height);
+}
+
+void win_swap(const WinWindow *w) {
+    glfwSwapBuffers(w->window);
+}
