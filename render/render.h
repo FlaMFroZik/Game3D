@@ -8,6 +8,7 @@
 #include <GL/gl.h>
 
 #include "render/glx.h"
+#include "render/prim.h"
 
 #define RENDER_FOV        60.0   /* угол обзора по вертикали, градусы */
 #define RENDER_NEAR       0.1
@@ -18,7 +19,7 @@
 
 typedef struct {
     float sky[4];      /* цвет неба и тумана (rgba) */
-    GLuint texture;    /* текстура рельефа */
+    Texture texture;   /* текстура рельефа и блоков (см. render/prim.h) */
     GLdouble fov;      /* угол обзора по вертикали, градусы */
     GLdouble near_plane;
     GLdouble far_plane;

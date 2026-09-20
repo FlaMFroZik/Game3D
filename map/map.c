@@ -5,6 +5,7 @@
 
 #include "map/map.h"
 #include "physics/coll.h"
+#include "render/prim.h"
 
 Map g_map = {0};
 
@@ -101,8 +102,14 @@ int map_load(const char *filename) {
     return 1;
 }
 
-/* Отрисовка одного куба с текстурными координатами на каждой грани */
-static void draw_cube(const MapCube *c) {
+/* Отрисовка одного куба.
+ *
+ * Текстура не растягивается на грань: её координаты считаются от мировых
+ * осей (U — вдоль грани, V — вверх для боковых граней и вглубь для
+ * горизонтальных), поэтому рисунок масштабирован одинаково на всех гранях,
+ * повторяется по поверхности и продолжается на соседних кубах.
+ * Размер одной копии текстуры задаёт PRIM_TEX_TILE_METERS (render/prim.h). */
+static void draw_cube(const MapCube *c, const Texture *tex) {
     float x0 = c->x;
     float y0 = c->y;
     float z0 = c->z;
@@ -110,62 +117,69 @@ static void draw_cube(const MapCube *c) {
     float y1 = c->y + c->sy;
     float z1 = c->z + c->sz;
 
+    /* координаты текстуры по каждой мировой оси: U и V считаются разными
+     * функциями (они совпадают только у квадратной текстуры) */
+    const float u_x0 = prim_tex_u(tex, x0), u_x1 = prim_tex_u(tex, x1);
+    const float u_z0 = prim_tex_u(tex, z0), u_z1 = prim_tex_u(tex, z1);
+    const float v_y0 = prim_tex_v(tex, y0), v_y1 = prim_tex_v(tex, y1);
+    const float v_z0 = prim_tex_v(tex, z0), v_z1 = prim_tex_v(tex, z1);
+
     glBegin(GL_TRIANGLES);
 
-    /* Передняя грань (Z+) */
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x0, y0, z1);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(x1, y0, z1);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x1, y1, z1);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x0, y0, z1);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x1, y1, z1);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(x0, y1, z1);
+    /* Передняя грань (Z+): U — по X, V — по Y (вверх) */
+    glTexCoord2f(u_x0, v_y0); glVertex3f(x0, y0, z1);
+    glTexCoord2f(u_x1, v_y0); glVertex3f(x1, y0, z1);
+    glTexCoord2f(u_x1, v_y1); glVertex3f(x1, y1, z1);
+    glTexCoord2f(u_x0, v_y0); glVertex3f(x0, y0, z1);
+    glTexCoord2f(u_x1, v_y1); glVertex3f(x1, y1, z1);
+    glTexCoord2f(u_x0, v_y1); glVertex3f(x0, y1, z1);
 
     /* Задняя грань (Z-) */
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(x0, y0, z0);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x0, y1, z0);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(x1, y1, z0);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(x0, y0, z0);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(x1, y1, z0);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x1, y0, z0);
+    glTexCoord2f(u_x0, v_y0); glVertex3f(x0, y0, z0);
+    glTexCoord2f(u_x0, v_y1); glVertex3f(x0, y1, z0);
+    glTexCoord2f(u_x1, v_y1); glVertex3f(x1, y1, z0);
+    glTexCoord2f(u_x0, v_y0); glVertex3f(x0, y0, z0);
+    glTexCoord2f(u_x1, v_y1); glVertex3f(x1, y1, z0);
+    glTexCoord2f(u_x1, v_y0); glVertex3f(x1, y0, z0);
 
-    /* Верхняя грань (Y+) */
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(x0, y1, z0);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x0, y1, z1);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(x1, y1, z1);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(x0, y1, z0);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(x1, y1, z1);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x1, y1, z0);
+    /* Верхняя грань (Y+): U — по X, V — по Z */
+    glTexCoord2f(u_x0, v_z0); glVertex3f(x0, y1, z0);
+    glTexCoord2f(u_x0, v_z1); glVertex3f(x0, y1, z1);
+    glTexCoord2f(u_x1, v_z1); glVertex3f(x1, y1, z1);
+    glTexCoord2f(u_x0, v_z0); glVertex3f(x0, y1, z0);
+    glTexCoord2f(u_x1, v_z1); glVertex3f(x1, y1, z1);
+    glTexCoord2f(u_x1, v_z0); glVertex3f(x1, y1, z0);
 
     /* Нижняя грань (Y-) */
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x0, y0, z0);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(x1, y0, z0);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x1, y0, z1);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x0, y0, z0);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x1, y0, z1);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(x0, y0, z1);
+    glTexCoord2f(u_x0, v_z0); glVertex3f(x0, y0, z0);
+    glTexCoord2f(u_x1, v_z0); glVertex3f(x1, y0, z0);
+    glTexCoord2f(u_x1, v_z1); glVertex3f(x1, y0, z1);
+    glTexCoord2f(u_x0, v_z0); glVertex3f(x0, y0, z0);
+    glTexCoord2f(u_x1, v_z1); glVertex3f(x1, y0, z1);
+    glTexCoord2f(u_x0, v_z1); glVertex3f(x0, y0, z1);
 
-    /* Правая грань (X+) */
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x1, y0, z0);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(x1, y1, z0);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x1, y1, z1);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x1, y0, z0);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x1, y1, z1);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(x1, y0, z1);
+    /* Правая грань (X+): U — по Z, V — по Y */
+    glTexCoord2f(u_z0, v_y0); glVertex3f(x1, y0, z0);
+    glTexCoord2f(u_z0, v_y1); glVertex3f(x1, y1, z0);
+    glTexCoord2f(u_z1, v_y1); glVertex3f(x1, y1, z1);
+    glTexCoord2f(u_z0, v_y0); glVertex3f(x1, y0, z0);
+    glTexCoord2f(u_z1, v_y1); glVertex3f(x1, y1, z1);
+    glTexCoord2f(u_z1, v_y0); glVertex3f(x1, y0, z1);
 
-    /* Левая грань (X-) */
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x0, y0, z0);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(x0, y0, z1);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x0, y1, z1);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(x0, y0, z0);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(x0, y1, z1);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(x0, y1, z0);
+    /* Левая грань (X-): U — по Z, V — по Y */
+    glTexCoord2f(u_z0, v_y0); glVertex3f(x0, y0, z0);
+    glTexCoord2f(u_z1, v_y0); glVertex3f(x0, y0, z1);
+    glTexCoord2f(u_z1, v_y1); glVertex3f(x0, y1, z1);
+    glTexCoord2f(u_z0, v_y0); glVertex3f(x0, y0, z0);
+    glTexCoord2f(u_z1, v_y1); glVertex3f(x0, y1, z1);
+    glTexCoord2f(u_z0, v_y1); glVertex3f(x0, y1, z0);
 
     glEnd();
 }
 
-void map_render(void) {
+void map_render(const Texture *tex) {
     for (size_t i = 0; i < g_map.count; i++) {
-        draw_cube(&g_map.cubes[i]);
+        draw_cube(&g_map.cubes[i], tex);
     }
 }
 

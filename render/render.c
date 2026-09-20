@@ -21,7 +21,7 @@ int render_init(Renderer *r, const char *texture_file) {
     r->far_plane = RENDER_FAR;
 
     r->texture = prim_load_texture(texture_file);
-    return r->texture != 0;
+    return r->texture.id != 0;
 }
 
 void render_setup_gl(void) {
@@ -34,8 +34,7 @@ void render_setup_gl(void) {
 }
 
 void render_shutdown(Renderer *r) {
-    prim_free_texture(r->texture);
-    r->texture = 0;
+    prim_free_texture(&r->texture);
 }
 
 void render_clear(const Renderer *r) {
@@ -70,13 +69,13 @@ void render_world(const Renderer *r, const Player *player) {
     int pcz = gen_chunk_coord(gen_world_to_cell(player->z));
 
     glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, r->texture);
+    glBindTexture(GL_TEXTURE_2D, r->texture.id);
 
     /* Карта и процедурная генерация взаимно исключают: генерация —
      * fallback, её рисуем только когда карта из файла не загружена,
      * иначе рельеф накладывается на кубы карты. */
     if (map_is_custom()) {
-        map_render();
+        map_render(&r->texture);
     } else {
         for (int i = 0; i < gen_chunk_count(); i++) {
             const Chunk *c = gen_chunk_at(i);
@@ -99,7 +98,7 @@ void render_world(const Renderer *r, const Player *player) {
                     quad.y01 = gen_chunk_y(c, x,     z + 1);
                     quad.y11 = gen_chunk_y(c, x + 1, z + 1);
 
-                    prim_draw_cell(&quad);
+                    prim_draw_cell(&r->texture, &quad);
                 }
             }
         }
