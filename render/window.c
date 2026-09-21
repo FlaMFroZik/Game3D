@@ -77,6 +77,10 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
 
     glfwWindowHint(GLFW_DEPTH_BITS, 24);
     glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+    /* Окно можно свободно растягивать в обе стороны. Не задаём
+     * верхний предел: оно может быть больше стартового размера и даже
+     * занимать весь экран через кнопку разворачивания менеджера окон. */
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     /* Рендер использует фиксированный конвейер (glBegin/glMatrixMode),
      * поэтому просим совместимый профиль 3.3. Если драйвер его не даст —
@@ -90,6 +94,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_DEPTH_BITS, 24);
         glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
         w->window = glfwCreateWindow(width, height, title, NULL, NULL);
         if (!w->window) {
             fprintf(stderr, "Cannot create window: %s\n", glfw_error_string());
@@ -99,6 +104,9 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     }
 
     glfwMakeContextCurrent(w->window);
+    /* GLFW не ограничивает максимальный размер окна сам по себе, но
+     * явно сбрасываем возможный лимит платформы/предыдущих настроек. */
+    glfwSetWindowSizeLimits(w->window, 320, 240, GLFW_DONT_CARE, GLFW_DONT_CARE);
     glfwSwapInterval(1); /* одинаковое ограничение частоты кадров на обеих ОС */
 
     glfwSetKeyCallback(w->window, key_callback);
