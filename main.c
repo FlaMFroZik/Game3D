@@ -82,14 +82,18 @@ int main(int argc, char **argv) {
             accumulator -= PHYSICS_STEP;
         }
 
-        /* Генерация — fallback на случай, если карта не загружена;
-         * с кастомной картой чанки не нужны ни рендеру, ни физике. */
-        if (!map_is_custom()) {
-            gen_update_chunks(player.x, player.z);
-        }
-
         int width, height;
         win_size(&window, &width, &height);
+
+        /* Генерация — fallback на случай, если карта не загружена;
+         * с кастомной картой чанки не нужны ни рендеру, ни физике.
+         * Радиус мира берётся от глубины тумана: за ней пиксели всё равно
+         * залиты цветом неба, а внутри неё рельеф должен быть целиком —
+         * иначе на краю кадра виден обрыв загруженных чанков. */
+        if (!map_is_custom()) {
+            gen_set_view_radius(render_view_radius(&player));
+            gen_update_chunks(player.x, player.z);
+        }
 
         render_clear(&renderer);
         render_camera(&renderer, &player, width, height);
