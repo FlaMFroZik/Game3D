@@ -4,6 +4,7 @@
 
 #include "map/gen.h"
 #include "map/map.h"
+#include "physics/coll.h"
 #include "physics/physics.h"
 #include "render/prim.h"
 #include "render/render.h"
@@ -60,6 +61,31 @@ static void render_look_at(float eye_x, float eye_y, float eye_z,
     glMultMatrixd(matrix);
 }
 
+/* Камера стоит в середине коллайдера и при наклоне взгляда не сдвигается
+ * (см. physics), поэтому её высота — это высота центра, спроецированная
+ * на вертикаль. Нужна, чтобы посчитать, докуда достаёт луч в горизонт. */
+static double render_eye_height(const Player *player) {
+    const double half_height = 0.5 * (double)COLL_HEIGHT;
+    double pitch = (double)player->pitch;
+    if (pitch < -PHYS_PITCH_LIMIT) pitch = -PHYS_PITCH_LIMIT;
+    if (pitch > PHYS_PITCH_LIMIT) pitch = PHYS_PITCH_LIMIT;
+
+    return (double)player->y - half_height * cos(pitch);
+}
+
+float render_view_radius(const Player *player) {
+    /* Всё, что дальше конца тумана, залито его цветом и на картинке уже не
+     * видно. Значит, мир должен быть готов ровно на эту глубину — и ни
+     * метром меньше, иначе на краю кадра появится обрыв рельефа.
+     * Пиксель на горизонте уходит вдаль тем дальше по земле, чем выше
+     * камера, отсюда гипотенуза. От размера окна радиус не зависит: широкое
+     * окно показывает больше мира по сторонам, а не «за туман». */
+    const double eye_y = render_eye_height(player);
+    const double fog_end = (double)RENDER_FOG_END;
+
+    return (float)(sqrt(eye_y * eye_y + fog_end * fog_end) + RENDER_VIEW_MARGIN);
+}
+
 int render_init(Renderer *r, const char *texture_file) {
     r->sky[0] = 0.45f;
     r->sky[1] = 0.65f;
@@ -96,6 +122,15 @@ void render_clear(const Renderer *r) {
 }
 
 void render_camera(const Renderer *r, const Player *player, int width, int height) {
+    /* Область отрисовки — окно целиком. Без этого OpenGL рисует в размер,
+     * который был при создании контекста: растянутое окно показывало бы
+     * картинку в углу, а остальное оставалось чёрным. */
+    if (width <= 0 || height <= 0) {
+        width = 1;
+        height = 1;
+    }
+    glViewport(0, 0, width, height);
+
     float aspect = (height > 0) ? (float)width / (float)height : 1.0f;
 
     glMatrixMode(GL_PROJECTION);
@@ -111,25 +146,29 @@ void render_camera(const Renderer *r, const Player *player, int width, int heigh
 }
 
 void render_world(const Renderer *r, const Player *player) {
-    /* чанк игрока в координатах клеток (мировые единицы -> клетки) */
-    int pcx = gen_chunk_coord(gen_world_to_cell(player->x));
-    int pcz = gen_chunk_coord(gen_world_to_cell(player->z));
-
     glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, r->texture.id);
 
     /* Карта и процедурная генерация взаимно исключают: генерация —
      * fallback, её рисуем только когда карта из файла не загружена,
      * иначе рельеф накладывается на кубы карты. */
     if (map_is_custom()) {
+        /* У кубов карты могут быть свои текстуры, поэтому map_render сам
+         * привязывает нужную текстуру каждому кубу; r->texture — та, которой
+         * нарисуются кубы без своей. */
         map_render(&r->texture);
     } else {
+        glBindTexture(GL_TEXTURE_2D, r->texture.id);
+
+        /* Рисуем всё загруженное вокруг игрока, но за пределами радиуса
+         * видимости клетки пропускаем: там они всё равно залиты цветом
+         * тумана, а платить за них кадром не нужно. Границы «нарисовано»
+         * и «видно» совпадают, поэтому обрыва рельефа в кадре не бывает
+         * при любом размере окна. */
+        const float reach = render_view_radius(player);
+        const float reach_sq = reach * reach;
+
         for (int i = 0; i < gen_chunk_count(); i++) {
             const Chunk *c = gen_chunk_at(i);
-
-            /* рисуем только чанки в радиусе видимости */
-            if (c->cx < pcx - GEN_VIEW_RADIUS || c->cx > pcx + GEN_VIEW_RADIUS) continue;
-            if (c->cz < pcz - GEN_VIEW_RADIUS || c->cz > pcz + GEN_VIEW_RADIUS) continue;
 
             for (int x = 0; x < GEN_CHUNK_SIZE; x++) {
                 for (int z = 0; z < GEN_CHUNK_SIZE; z++) {
@@ -139,6 +178,18 @@ void render_world(const Renderer *r, const Player *player) {
                     quad.z0 = (float)(c->cz * GEN_CHUNK_SIZE + z) * GEN_CELL_SIZE;
                     quad.x1 = quad.x0 + GEN_CELL_SIZE;
                     quad.z1 = quad.z0 + GEN_CELL_SIZE;
+
+                    /* ближайшая к игроку точка клетки: если она дальше
+                     * радиуса видимости, клетку не видно совсем */
+                    float nx = player->x;
+                    if (nx < quad.x0) nx = quad.x0;
+                    if (nx > quad.x1) nx = quad.x1;
+                    float nz = player->z;
+                    if (nz < quad.z0) nz = quad.z0;
+                    if (nz > quad.z1) nz = quad.z1;
+                    float dx = player->x - nx;
+                    float dz = player->z - nz;
+                    if (dx * dx + dz * dz > reach_sq) continue;
 
                     quad.y00 = gen_chunk_y(c, x,     z);
                     quad.y10 = gen_chunk_y(c, x + 1, z);

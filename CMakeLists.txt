@@ -18,6 +18,7 @@ set(GAME3D_SOURCES
     physics/physics.c
     render/prim.c
     render/render.c
+    render/texpool.c
     render/window.c
 )
 

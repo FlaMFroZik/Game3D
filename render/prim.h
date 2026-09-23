@@ -13,7 +13,8 @@
 
 #include <GL/gl.h>
 
-/* Сколько метров мира занимает большая сторона одной копии текстуры.
+/* Сколько метров мира занимает большая сторона одной копии текстуры
+ * по умолчанию (карта может задать свой размер — см. map/map.h).
  * Меньшая сторона — пропорционально сторонам текстуры, поэтому тексель
  * остаётся квадратным на любой грани и при любой форме текстуры:
  * при 64x64 одна копия накрывает 2 x 2 м, при 64x16 — 2 x 0.5 м. */
@@ -42,6 +43,12 @@ void prim_free_texture(Texture *tex);
 
 float prim_tex_u(const Texture *tex, float meters);
 float prim_tex_v(const Texture *tex, float meters);
+
+/* То же, но с явным размером одной копии текстуры: tile_meters — сколько
+ * метров мира занимает большая сторона копии (<= 0 — PRIM_TEX_TILE_METERS).
+ * Нужно картам, где у каждого куба свой масштаб рисунка. */
+float prim_tex_u_tile(const Texture *tex, float meters, float tile_meters);
+float prim_tex_v_tile(const Texture *tex, float meters, float tile_meters);
 
 /* Четыре угла клетки: (x0,z0)-(x1,z1), высоты y00/y10/y01/y11. */
 typedef struct {

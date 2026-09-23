@@ -111,8 +111,29 @@ _Static_assert(GEN_MAX_HEIGHT_Q <= 255, "высота не влезает в Gen
 static Chunk chunk_pool[GEN_MAX_CHUNKS];
 static int   chunk_count = 0;
 
+/* Радиус загруженного мира в чанках: его задаёт рендер (глубина тумана),
+ * а не жёсткая константа — иначе край мира оказывается внутри кадра. */
+static int view_radius = GEN_VIEW_RADIUS_MIN;
+
+void gen_set_view_radius(float meters) {
+    int chunks = 0;
+
+    if (meters > 0.0f) {
+        chunks = (int)ceilf(meters / GEN_CELL_SIZE / (float)GEN_CHUNK_SIZE);
+    }
+    if (chunks < GEN_VIEW_RADIUS_MIN) chunks = GEN_VIEW_RADIUS_MIN;
+    if (chunks > GEN_VIEW_RADIUS_MAX) chunks = GEN_VIEW_RADIUS_MAX;
+
+    view_radius = chunks;
+}
+
+int gen_view_radius(void) {
+    return view_radius;
+}
+
 void gen_init(void) {
     chunk_count = 0;
+    view_radius = GEN_VIEW_RADIUS_MIN;
 
     /* time_t имеет разный размер на разных компиляторах; явно сворачиваем
      * значение в 32-битный seed без предупреждений MSVC/GCC. */
@@ -162,7 +183,7 @@ static Chunk *load_chunk(int cx, int cz) {
  * будут загружены новые. Дыр в рельефе не бывает — высоты берутся
  * из шума, даже если чанк не загружен. */
 static void unload_far_chunks(int pcx, int pcz) {
-    const int keep = GEN_VIEW_RADIUS + 1;
+    const int keep = view_radius + 1;   /* запас, чтобы кольцо не мигало на стыке */
 
     for (int i = 0; i < chunk_count; ) {
         Chunk *c = &chunk_pool[i];
@@ -187,8 +208,8 @@ void gen_update_chunks(float cam_x, float cam_z) {
     unload_far_chunks(pcx, pcz);
 
     int generated = 0;
-    for (int dx = -GEN_VIEW_RADIUS; dx <= GEN_VIEW_RADIUS && generated < GEN_MAX_CHUNKS_PER_FRAME; dx++) {
-        for (int dz = -GEN_VIEW_RADIUS; dz <= GEN_VIEW_RADIUS && generated < GEN_MAX_CHUNKS_PER_FRAME; dz++) {
+    for (int dx = -view_radius; dx <= view_radius && generated < GEN_MAX_CHUNKS_PER_FRAME; dx++) {
+        for (int dz = -view_radius; dz <= view_radius && generated < GEN_MAX_CHUNKS_PER_FRAME; dz++) {
             int cx = pcx + dx;
             int cz = pcz + dz;
 

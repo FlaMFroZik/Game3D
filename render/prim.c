@@ -10,20 +10,29 @@
 /* Число текселей, приходящееся на метр поверхности. Одно и то же по обеим
  * осям — в этом и смысл: тексель остаётся квадратным, а текстура занимает
  * в мире столько места, сколько позволяют её пропорции. */
-static float texels_per_meter(const Texture *tex) {
+static float texels_per_meter(const Texture *tex, float tile_meters) {
     int big = (tex->width > tex->height) ? tex->width : tex->height;
     if (big <= 0) return 1.0f;
-    return (float)big / PRIM_TEX_TILE_METERS;
+    if (!(tile_meters > 0.0f)) tile_meters = PRIM_TEX_TILE_METERS;
+    return (float)big / tile_meters;
 }
 
 float prim_tex_u(const Texture *tex, float meters) {
-    if (tex->width <= 0) return 0.0f;
-    return meters * texels_per_meter(tex) / (float)tex->width;
+    return prim_tex_u_tile(tex, meters, 0.0f);
 }
 
 float prim_tex_v(const Texture *tex, float meters) {
+    return prim_tex_v_tile(tex, meters, 0.0f);
+}
+
+float prim_tex_u_tile(const Texture *tex, float meters, float tile_meters) {
+    if (tex->width <= 0) return 0.0f;
+    return meters * texels_per_meter(tex, tile_meters) / (float)tex->width;
+}
+
+float prim_tex_v_tile(const Texture *tex, float meters, float tile_meters) {
     if (tex->height <= 0) return 0.0f;
-    return meters * texels_per_meter(tex) / (float)tex->height;
+    return meters * texels_per_meter(tex, tile_meters) / (float)tex->height;
 }
 
 Texture prim_load_texture(const char *filename) {
