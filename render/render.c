@@ -116,14 +116,18 @@ void render_world(const Renderer *r, const Player *player) {
     int pcz = gen_chunk_coord(gen_world_to_cell(player->z));
 
     glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, r->texture.id);
 
     /* Карта и процедурная генерация взаимно исключают: генерация —
      * fallback, её рисуем только когда карта из файла не загружена,
      * иначе рельеф накладывается на кубы карты. */
     if (map_is_custom()) {
+        /* У кубов карты могут быть свои текстуры, поэтому map_render сам
+         * привязывает нужную текстуру каждому кубу; r->texture — та, которой
+         * нарисуются кубы без своей. */
         map_render(&r->texture);
     } else {
+        glBindTexture(GL_TEXTURE_2D, r->texture.id);
+
         for (int i = 0; i < gen_chunk_count(); i++) {
             const Chunk *c = gen_chunk_at(i);
 
