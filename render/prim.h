@@ -50,6 +50,17 @@ float prim_tex_v(const Texture *tex, float meters);
 float prim_tex_u_tile(const Texture *tex, float meters, float tile_meters);
 float prim_tex_v_tile(const Texture *tex, float meters, float tile_meters);
 
+/* Вершина с координатами текстуры. */
+typedef struct {
+    float u, v;     /* координаты текстуры */
+    float x, y, z;  /* позиция в мире */
+} PrimVertex;
+
+/* Четырёхугольник v[0..3] как два треугольника (0,1,2) и (0,2,3).
+ * Только вершины: вызывать между glBegin(GL_TRIANGLES) и glEnd, чтобы
+ * много граней уходило одним пакетом. */
+void prim_emit_quad(const PrimVertex v[4]);
+
 /* Четыре угла клетки: (x0,z0)-(x1,z1), высоты y00/y10/y01/y11. */
 typedef struct {
     float x0, z0;   /* дальний (по X и Z) угол клетки */

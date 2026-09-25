@@ -61,14 +61,18 @@ static void render_look_at(float eye_x, float eye_y, float eye_z,
     glMultMatrixd(matrix);
 }
 
+static float clampf(float v, float lo, float hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
 /* Камера стоит в середине коллайдера и при наклоне взгляда не сдвигается
  * (см. physics), поэтому её высота — это высота центра, спроецированная
  * на вертикаль. Нужна, чтобы посчитать, докуда достаёт луч в горизонт. */
 static double render_eye_height(const Player *player) {
     const double half_height = 0.5 * (double)COLL_HEIGHT;
-    double pitch = (double)player->pitch;
-    if (pitch < -PHYS_PITCH_LIMIT) pitch = -PHYS_PITCH_LIMIT;
-    if (pitch > PHYS_PITCH_LIMIT) pitch = PHYS_PITCH_LIMIT;
+    const double pitch = (double)clampf(player->pitch, -PHYS_PITCH_LIMIT, PHYS_PITCH_LIMIT);
 
     return (double)player->y - half_height * cos(pitch);
 }
@@ -131,7 +135,7 @@ void render_camera(const Renderer *r, const Player *player, int width, int heigh
     }
     glViewport(0, 0, width, height);
 
-    float aspect = (height > 0) ? (float)width / (float)height : 1.0f;
+    const float aspect = (float)width / (float)height;
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -143,6 +147,51 @@ void render_camera(const Renderer *r, const Player *player, int width, int heigh
     float dir_x, dir_y, dir_z;
     phys_view_dir(player, &dir_x, &dir_y, &dir_z);
     render_look_at(player->x, player->y, player->z, dir_x, dir_y, dir_z);
+}
+
+/* Клетка видна, если её ближайшая к игроку точка не дальше радиуса
+ * видимости (reach_sq — его квадрат). */
+static int cell_visible(const CellQuad *q, const Player *player, float reach_sq) {
+    float dx = player->x - clampf(player->x, q->x0, q->x1);
+    float dz = player->z - clampf(player->z, q->z0, q->z1);
+    return dx * dx + dz * dz <= reach_sq;
+}
+
+/* Процедурный рельеф: все загруженные чанки вокруг игрока.
+ *
+ * Клетки за пределами радиуса видимости пропускаются: там они всё равно
+ * залиты цветом тумана, а платить за них кадром не нужно. Границы
+ * «нарисовано» и «видно» совпадают, поэтому обрыва рельефа в кадре не
+ * бывает при любом размере окна. */
+static void draw_terrain(const Renderer *r, const Player *player) {
+    const float reach = render_view_radius(player);
+    const float reach_sq = reach * reach;
+
+    glBindTexture(GL_TEXTURE_2D, r->texture.id);
+
+    for (int i = 0; i < gen_chunk_count(); i++) {
+        const Chunk *c = gen_chunk_at(i);
+
+        for (int x = 0; x < GEN_CHUNK_SIZE; x++) {
+            for (int z = 0; z < GEN_CHUNK_SIZE; z++) {
+                CellQuad quad;
+
+                quad.x0 = (float)(c->cx * GEN_CHUNK_SIZE + x) * GEN_CELL_SIZE;
+                quad.z0 = (float)(c->cz * GEN_CHUNK_SIZE + z) * GEN_CELL_SIZE;
+                quad.x1 = quad.x0 + GEN_CELL_SIZE;
+                quad.z1 = quad.z0 + GEN_CELL_SIZE;
+
+                if (!cell_visible(&quad, player, reach_sq)) continue;
+
+                quad.y00 = gen_chunk_y(c, x,     z);
+                quad.y10 = gen_chunk_y(c, x + 1, z);
+                quad.y01 = gen_chunk_y(c, x,     z + 1);
+                quad.y11 = gen_chunk_y(c, x + 1, z + 1);
+
+                prim_draw_cell(&r->texture, &quad);
+            }
+        }
+    }
 }
 
 void render_world(const Renderer *r, const Player *player) {
@@ -157,49 +206,7 @@ void render_world(const Renderer *r, const Player *player) {
          * нарисуются кубы без своей. */
         map_render(&r->texture);
     } else {
-        glBindTexture(GL_TEXTURE_2D, r->texture.id);
-
-        /* Рисуем всё загруженное вокруг игрока, но за пределами радиуса
-         * видимости клетки пропускаем: там они всё равно залиты цветом
-         * тумана, а платить за них кадром не нужно. Границы «нарисовано»
-         * и «видно» совпадают, поэтому обрыва рельефа в кадре не бывает
-         * при любом размере окна. */
-        const float reach = render_view_radius(player);
-        const float reach_sq = reach * reach;
-
-        for (int i = 0; i < gen_chunk_count(); i++) {
-            const Chunk *c = gen_chunk_at(i);
-
-            for (int x = 0; x < GEN_CHUNK_SIZE; x++) {
-                for (int z = 0; z < GEN_CHUNK_SIZE; z++) {
-                    CellQuad quad;
-
-                    quad.x0 = (float)(c->cx * GEN_CHUNK_SIZE + x) * GEN_CELL_SIZE;
-                    quad.z0 = (float)(c->cz * GEN_CHUNK_SIZE + z) * GEN_CELL_SIZE;
-                    quad.x1 = quad.x0 + GEN_CELL_SIZE;
-                    quad.z1 = quad.z0 + GEN_CELL_SIZE;
-
-                    /* ближайшая к игроку точка клетки: если она дальше
-                     * радиуса видимости, клетку не видно совсем */
-                    float nx = player->x;
-                    if (nx < quad.x0) nx = quad.x0;
-                    if (nx > quad.x1) nx = quad.x1;
-                    float nz = player->z;
-                    if (nz < quad.z0) nz = quad.z0;
-                    if (nz > quad.z1) nz = quad.z1;
-                    float dx = player->x - nx;
-                    float dz = player->z - nz;
-                    if (dx * dx + dz * dz > reach_sq) continue;
-
-                    quad.y00 = gen_chunk_y(c, x,     z);
-                    quad.y10 = gen_chunk_y(c, x + 1, z);
-                    quad.y01 = gen_chunk_y(c, x,     z + 1);
-                    quad.y11 = gen_chunk_y(c, x + 1, z + 1);
-
-                    prim_draw_cell(&r->texture, &quad);
-                }
-            }
-        }
+        draw_terrain(r, player);
     }
 
     glDisable(GL_TEXTURE_2D);

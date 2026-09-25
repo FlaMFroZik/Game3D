@@ -5,11 +5,24 @@
 #include "map/map.h"
 
 #define COLL_PROBE_POINTS 16  /* точек по окружности коллайдера */
+#define COLL_PI           3.14159265f
 
 static float s_current_feet_y = 0.0f;
 
 void coll_set_feet_y(float feet_y) {
     s_current_feet_y = feet_y;
+}
+
+/* Точка i из COLL_PROBE_POINTS на окружности коллайдера с центром (cx, cz). */
+static void probe_point(int i, float cx, float cz, float *px, float *pz) {
+    const float angle = (float)i * (2.0f * COLL_PI / COLL_PROBE_POINTS);
+    *px = cx + COLL_RADIUS * cosf(angle);
+    *pz = cz + COLL_RADIUS * sinf(angle);
+}
+
+/* Можно ли встать на землю высотой h: она не выше ног больше чем на шаг. */
+static int within_step(float h) {
+    return h <= s_current_feet_y + COLL_STEP_HEIGHT + COLL_EPSILON;
 }
 
 float coll_ground_height(float x, float z) {
@@ -26,14 +39,14 @@ float coll_player_ground_height(float cx, float cz) {
     if (map_is_custom()) {
         return map_cylinder_ground_height(cx, cz, COLL_RADIUS, s_current_feet_y, 0.0f);
     }
+
     float highest = gen_sample_height(cx, cz);
-    const float angle_step = 2.0f * 3.14159265f / COLL_PROBE_POINTS;
     for (int i = 0; i < COLL_PROBE_POINTS; i++) {
-        float angle = (float)i * angle_step;
-        float px = cx + COLL_RADIUS * cosf(angle);
-        float pz = cz + COLL_RADIUS * sinf(angle);
+        float px, pz;
+        probe_point(i, cx, cz, &px, &pz);
+
         float h = gen_sample_height(px, pz);
-        if (h <= s_current_feet_y + COLL_STEP_HEIGHT + COLL_EPSILON && h > highest) {
+        if (within_step(h) && h > highest) {
             highest = h;
         }
     }
@@ -53,13 +66,11 @@ int coll_capsule_blocked(float cx, float cz, float feet_y) {
         return map_capsule_blocked(cx, cz, feet_y);
     }
 
-    const float angle_step = 2.0f * 3.14159265f / COLL_PROBE_POINTS;
     float h_center = coll_ground_height(cx, cz);
 
     for (int i = 0; i < COLL_PROBE_POINTS; i++) {
-        float angle = (float)i * angle_step;
-        float px = cx + COLL_RADIUS * cosf(angle);
-        float pz = cz + COLL_RADIUS * sinf(angle);
+        float px, pz;
+        probe_point(i, cx, cz, &px, &pz);
 
         if (coll_point_blocked(px, pz, feet_y)) {
             return 1;
@@ -67,19 +78,13 @@ int coll_capsule_blocked(float cx, float cz, float feet_y) {
 
         /* Резкий перепад высот относительно центра — стена или обрыв. */
         float h_point = coll_ground_height(px, pz);
-        if (fabsf(h_point - h_center) > COLL_STEP_HEIGHT) {
-            float max_h = fmaxf(h_point, h_center);
-            if (feet_y < max_h - COLL_EPSILON) {
-                return 1;
-            }
+        if (fabsf(h_point - h_center) > COLL_STEP_HEIGHT
+            && feet_y < fmaxf(h_point, h_center) - COLL_EPSILON) {
+            return 1;
         }
     }
 
-    if (coll_point_blocked(cx, cz, feet_y)) {
-        return 1;
-    }
-
-    return 0;
+    return coll_point_blocked(cx, cz, feet_y);
 }
 
 void coll_move(float *x, float *z, float dx, float dz, float feet_y) {

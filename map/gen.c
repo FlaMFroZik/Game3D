@@ -5,12 +5,13 @@
 
 #include "gen.h"
 
-int GEN_SEED;
+/* Зерно шума: задаётся в gen_init, у каждого запуска свой мир. */
+static uint32_t gen_seed;
 
 /* ---------- Шум ---------- */
 
 static uint32_t hash2(int x, int y) {
-    uint32_t h = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u + GEN_SEED;
+    uint32_t h = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u + gen_seed;
     h ^= h >> 13;
     h *= 1274126177u;
     h ^= h >> 16;
@@ -26,6 +27,12 @@ static float smooth01(float t) {
     /* Квинтический smootherstep: C2 в узлах решётки, поэтому на стыках
      * октав нет заметных изломов — холмы получаются округлыми. */
     return t * t * t * (t * (6.0f * t - 15.0f) + 10.0f);
+}
+
+static int clampi(int v, int lo, int hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
 }
 
 static float clamp01(float v) {
@@ -98,9 +105,7 @@ static int raw_cell_height(int wx, int wz) {
            - GEN_TERRACE_ROUGH_Q;
     }
 
-    if (q < 0) q = 0;
-    if (q > GEN_MAX_HEIGHT_Q) q = GEN_MAX_HEIGHT_Q;
-    return q;
+    return clampi(q, 0, GEN_MAX_HEIGHT_Q);
 }
 
 /* ---------- Пул чанков ---------- */
@@ -121,10 +126,7 @@ void gen_set_view_radius(float meters) {
     if (meters > 0.0f) {
         chunks = (int)ceilf(meters / GEN_CELL_SIZE / (float)GEN_CHUNK_SIZE);
     }
-    if (chunks < GEN_VIEW_RADIUS_MIN) chunks = GEN_VIEW_RADIUS_MIN;
-    if (chunks > GEN_VIEW_RADIUS_MAX) chunks = GEN_VIEW_RADIUS_MAX;
-
-    view_radius = chunks;
+    view_radius = clampi(chunks, GEN_VIEW_RADIUS_MIN, GEN_VIEW_RADIUS_MAX);
 }
 
 int gen_view_radius(void) {
@@ -138,7 +140,7 @@ void gen_init(void) {
     /* time_t имеет разный размер на разных компиляторах; явно сворачиваем
      * значение в 32-битный seed без предупреждений MSVC/GCC. */
     uint64_t now = (uint64_t)time(NULL);
-    GEN_SEED = (int)(now ^ (now >> 32));
+    gen_seed = (uint32_t)(now ^ (now >> 32));
 }
 
 int gen_chunk_count(void) {
@@ -234,8 +236,13 @@ int gen_cell_height(int wx, int wz) {
     return raw_cell_height(wx, wz);  /* значения совпадают с данными чанка */
 }
 
+/* Высота в квантах -> высота в мире. */
+static float height_to_y(int q) {
+    return (float)q * GEN_HEIGHT_STEP + GEN_TERRAIN_OFFSET;
+}
+
 static float cell_y(int wx, int wz) {
-    return (float)gen_cell_height(wx, wz) * GEN_HEIGHT_STEP + GEN_TERRAIN_OFFSET;
+    return height_to_y(gen_cell_height(wx, wz));
 }
 
 float gen_sample_height(float x, float z) {
@@ -253,12 +260,9 @@ float gen_sample_height(float x, float z) {
 }
 
 float gen_chunk_y(const Chunk *c, int lx, int lz) {
-    if (lx < 0) lx = 0;
-    if (lx > GEN_CHUNK_SIZE) lx = GEN_CHUNK_SIZE;
-    if (lz < 0) lz = 0;
-    if (lz > GEN_CHUNK_SIZE) lz = GEN_CHUNK_SIZE;
-
-    return (float)c->height[lx][lz] * GEN_HEIGHT_STEP + GEN_TERRAIN_OFFSET;
+    lx = clampi(lx, 0, GEN_CHUNK_SIZE);
+    lz = clampi(lz, 0, GEN_CHUNK_SIZE);
+    return height_to_y(c->height[lx][lz]);
 }
 
 /* ---------- Координаты ---------- */

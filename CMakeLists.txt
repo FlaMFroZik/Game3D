@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Game3D VERSION 1.1 LANGUAGES C)
+project(Game3D VERSION 1.3 LANGUAGES C)
 
 option(GAME3D_FETCH_GLFW
        "Download GLFW when a system package is not available"
@@ -92,7 +92,7 @@ if(GAME3D_SANITIZERS)
     endif()
 endif()
 
-# Keep the executable in the build root on single-config generators.
+# Strict C11 without compiler extensions on every generator.
 set_target_properties(game3d PROPERTIES
     C_STANDARD 11
     C_STANDARD_REQUIRED YES
