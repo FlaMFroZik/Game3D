@@ -8,7 +8,12 @@
 static int key_state[WIN_KEY_COUNT];
 static int button_state[WIN_BUTTON_COUNT];
 
-static int quit_requested = 0;
+/* События «один раз»: ставятся в колбэках GLFW и снимаются чтением,
+ * поэтому меню видит ровно одно нажатие, даже если опрос был реже. */
+static int button_clicked[WIN_BUTTON_COUNT];
+static double scroll_accum = 0.0;
+static int escape_pressed = 0;
+
 static int glfw_ready = 0;
 
 static const char *glfw_error_string(void) {
@@ -40,8 +45,9 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     (void)window; (void)scancode; (void)mods;
     int slot = key_slot(key);
     if (slot >= 0) key_state[slot] = (action != GLFW_RELEASE);
+    /* Esc больше не закрывает игру сразу: его забирает меню (см. main.c). */
     if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
-        quit_requested = 1;
+        escape_pressed = 1;
     }
 }
 
@@ -49,7 +55,13 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
     (void)window; (void)mods;
     if (button >= 0 && button < WIN_BUTTON_COUNT) {
         button_state[button] = (action != GLFW_RELEASE);
+        if (action == GLFW_PRESS) button_clicked[button] = 1;
     }
+}
+
+static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
+    (void)window; (void)xoffset;
+    scroll_accum += yoffset;
 }
 
 int win_key_down(WinKey key) {
@@ -60,6 +72,49 @@ int win_key_down(WinKey key) {
 int win_button_down(int button) {
     if (button < 0 || button >= WIN_BUTTON_COUNT) return 0;
     return button_state[button];
+}
+
+void win_pointer_pixels(const WinWindow *w, int *x, int *y) {
+    double sx = 0.0, sy = 0.0;
+    glfwGetCursorPos(w->window, &sx, &sy);
+
+    /* Координаты курсора GLFW отдаёт в логических пикселях окна, а рисуем
+     * мы в пикселях кадра: на экранах с масштабированием они отличаются. */
+    int win_w = 1, win_h = 1;
+    int fb_w = 1, fb_h = 1;
+    glfwGetWindowSize(w->window, &win_w, &win_h);
+    glfwGetFramebufferSize(w->window, &fb_w, &fb_h);
+
+    const double kx = (win_w > 0) ? (double)fb_w / (double)win_w : 1.0;
+    const double ky = (win_h > 0) ? (double)fb_h / (double)win_h : 1.0;
+
+    if (x) *x = (int)(sx * kx);
+    if (y) *y = (int)(sy * ky);
+}
+
+int win_mouse_clicked(int button) {
+    if (button < 0 || button >= WIN_BUTTON_COUNT) return 0;
+    const int clicked = button_clicked[button];
+    button_clicked[button] = 0;
+    return clicked;
+}
+
+double win_scroll_delta(void) {
+    const double delta = scroll_accum;
+    scroll_accum = 0.0;
+    return delta;
+}
+
+int win_escape_pressed(void) {
+    const int pressed = escape_pressed;
+    escape_pressed = 0;
+    return pressed;
+}
+
+void win_reset_input(void) {
+    for (int i = 0; i < WIN_BUTTON_COUNT; i++) button_clicked[i] = 0;
+    scroll_accum = 0.0;
+    escape_pressed = 0;
 }
 
 /* ---------- Окно ---------- */
@@ -78,7 +133,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     memset(w, 0, sizeof(*w));
     memset(key_state, 0, sizeof(key_state));
     memset(button_state, 0, sizeof(button_state));
-    quit_requested = 0;
+    win_reset_input();
     glfw_ready = 0;
 
     if (!glfwInit()) {
@@ -116,6 +171,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
 
     glfwSetKeyCallback(w->window, key_callback);
     glfwSetMouseButtonCallback(w->window, mouse_button_callback);
+    glfwSetScrollCallback(w->window, scroll_callback);
     return 1;
 }
 
@@ -132,11 +188,12 @@ void win_shutdown(WinWindow *w) {
 
 int win_poll(WinWindow *w) {
     glfwPollEvents();
-    /* Кнопка «закрыть» оконного менеджера тоже должна завершать игру. */
+    /* Кнопка «закрыть» оконного менеджера завершает игру. Esc — нет:
+     * его нажатие ждёт win_escape_pressed, а меню решает, что делать. */
     if (w->window && glfwWindowShouldClose(w->window)) {
         return 1;
     }
-    return quit_requested;
+    return 0;
 }
 
 double win_time_seconds(void) {
