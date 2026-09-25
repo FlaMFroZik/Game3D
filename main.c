@@ -24,6 +24,67 @@ static void read_input(PlayerInput *in) {
     in->run     = win_key_down(WIN_KEY_SHIFT);
 }
 
+/* Карта из файла; если её нет или она не читается — процедурный мир. */
+static void load_world(const char *map_file) {
+    map_init();
+    if (map_file && !map_load(map_file)) {
+        printf("Fallback to procedural terrain generation.\n");
+    }
+    gen_init();
+}
+
+/* Один кадр мира: подгрузка чанков вокруг игрока и отрисовка. */
+static void draw_frame(Renderer *renderer, const WinWindow *window, const Player *player) {
+    int width, height;
+    win_size(window, &width, &height);
+
+    /* Генерация — fallback на случай, если карта не загружена;
+     * с кастомной картой чанки не нужны ни рендеру, ни физике.
+     * Радиус мира берётся от глубины тумана: за ней пиксели всё равно
+     * залиты цветом неба, а внутри неё рельеф должен быть целиком —
+     * иначе на краю кадра виден обрыв загруженных чанков. */
+    if (!map_is_custom()) {
+        gen_set_view_radius(render_view_radius(player));
+        gen_update_chunks(player->x, player->z);
+    }
+
+    render_clear(renderer);
+    render_camera(renderer, player, width, height);
+    render_world(renderer, player);
+
+    win_swap(window);
+}
+
+/* Игровой цикл до закрытия окна или Esc. */
+static void run_game(WinWindow *window, Renderer *renderer) {
+    Player player;
+    phys_init(&player);
+
+    /* GLFW предоставляет монотонные часы на Windows, Linux и macOS. */
+    double last_time = win_time_seconds();
+    double accumulator = 0.0;
+
+    while (!win_poll(window)) {
+        double now = win_time_seconds();
+        double delta = now - last_time;
+        last_time = now;
+
+        if (delta > MAX_FRAME_DELTA) delta = MAX_FRAME_DELTA;
+        if (delta < 0.0) delta = 0.0;
+        accumulator += delta;
+
+        /* Фиксированный шаг физики: поведение не зависит от FPS. */
+        while (accumulator >= PHYSICS_STEP) {
+            PlayerInput in;
+            read_input(&in);
+            phys_update(&player, &in, PHYSICS_STEP);
+            accumulator -= PHYSICS_STEP;
+        }
+
+        draw_frame(renderer, window, &player);
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc < 2 || argc > 3) {
         fprintf(stderr, "Usage: %s <texture-file> [map-file]\n", argv[0]);
@@ -45,62 +106,10 @@ int main(int argc, char **argv) {
         win_shutdown(&window);
         return 1;
     }
-
     render_setup_gl();
 
-    map_init();
-    if (map_file) {
-        if (!map_load(map_file)) {
-            printf("Fallback to procedural terrain generation.\n");
-        }
-    }
-
-    gen_init();
-
-    Player player;
-    phys_init(&player);
-
-    /* GLFW предоставляет монотонные часы на Windows, Linux и macOS. */
-    double last_time = win_time_seconds();
-    double accumulator = 0.0;
-
-    while (!win_poll(&window)) {
-        double frame_start = win_time_seconds();
-
-        double delta = frame_start - last_time;
-        last_time = frame_start;
-
-        if (delta > MAX_FRAME_DELTA) delta = MAX_FRAME_DELTA;
-        if (delta < 0.0) delta = 0.0;
-        accumulator += delta;
-
-        /* Фиксированный шаг физики: поведение не зависит от FPS. */
-        while (accumulator >= PHYSICS_STEP) {
-            PlayerInput in;
-            read_input(&in);
-            phys_update(&player, &in, PHYSICS_STEP);
-            accumulator -= PHYSICS_STEP;
-        }
-
-        int width, height;
-        win_size(&window, &width, &height);
-
-        /* Генерация — fallback на случай, если карта не загружена;
-         * с кастомной картой чанки не нужны ни рендеру, ни физике.
-         * Радиус мира берётся от глубины тумана: за ней пиксели всё равно
-         * залиты цветом неба, а внутри неё рельеф должен быть целиком —
-         * иначе на краю кадра виден обрыв загруженных чанков. */
-        if (!map_is_custom()) {
-            gen_set_view_radius(render_view_radius(&player));
-            gen_update_chunks(player.x, player.z);
-        }
-
-        render_clear(&renderer);
-        render_camera(&renderer, &player, width, height);
-        render_world(&renderer, &player);
-
-        win_swap(&window);
-    }
+    load_world(map_file);
+    run_game(&window, &renderer);
 
     render_shutdown(&renderer);
     map_free();

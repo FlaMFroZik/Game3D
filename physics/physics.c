@@ -19,38 +19,37 @@ void phys_view_dir(const Player *p, float *dx, float *dy, float *dz) {
     *dz = -cosf(p->yaw) * cp;
 }
 
-void phys_update(Player *p, const PlayerInput *in, double dt) {
-    float step = (float)dt;
+/* Низ коллайдера: ноги на половину высоты ниже камеры. */
+static float feet_y(const Player *p) {
+    return p->y - COLL_HEIGHT * 0.5f;
+}
 
+/* Ходьба и бег со скольжением вдоль стен. */
+static void move_horizontal(Player *p, const PlayerInput *in, float step) {
     /* Горизонтальные оси движения зависят только от yaw: pitch не должен
      * влиять на скорость ходьбы (иначе при взгляде вверх/вниз идём медленнее). */
-    float dir_x =  sinf(p->yaw);
-    float dir_z = -cosf(p->yaw);
-    float right_x = -dir_z;
-    float right_z =  dir_x;
+    const float dir_x =  sinf(p->yaw);
+    const float dir_z = -cosf(p->yaw);
+    const float right_x = -dir_z;
+    const float right_z =  dir_x;
 
     float move = PHYS_MOVE_SPEED * step;
-    float look = PHYS_LOOK_SPEED * step;
-
     float dx = (in->forward * dir_x + in->strafe * right_x) * move;
     float dz = (in->forward * dir_z + in->strafe * right_z) * move;
     if (in->run) {
-        dx *= 2.0f;
-        dz *= 2.0f;
+        dx *= PHYS_RUN_FACTOR;
+        dz *= PHYS_RUN_FACTOR;
     }
 
-    /* Ноги на половину высоты коллайдера ниже камеры. */
-    float feet_y = p->y - COLL_HEIGHT * 0.5f;
-    coll_set_feet_y(feet_y);
-    coll_move(&p->x, &p->z, dx, dz, feet_y);
+    coll_move(&p->x, &p->z, dx, dz, feet_y(p));
+}
 
-    /* --- Вертикальная физика --- */
-
+/* Гравитация, приземление и прыжок. */
+static void move_vertical(Player *p, const PlayerInput *in, float step) {
     /* Земля под игроком уже с учётом горизонтального шага. */
-    feet_y = p->y - COLL_HEIGHT * 0.5f;
-    coll_set_feet_y(feet_y);
-    float target_y = coll_player_ground_height(p->x, p->z) + COLL_HEIGHT * 0.5f;
-    int on_ground = (fabsf(p->y - target_y) < COLL_EPSILON);
+    coll_set_feet_y(feet_y(p));
+    const float target_y = coll_player_ground_height(p->x, p->z) + COLL_HEIGHT * 0.5f;
+    const int on_ground = (fabsf(p->y - target_y) < COLL_EPSILON);
 
     if (on_ground) {
         p->vel_y = 0.0f;
@@ -79,11 +78,23 @@ void phys_update(Player *p, const PlayerInput *in, double dt) {
     }
 
     p->y = next_y;
+}
 
-    /* Поворот камеры. */
-    p->yaw   += in->look_x * look;
-    p->pitch += in->look_y * look;
+/* Поворот камеры; наклон ограничен PHYS_PITCH_LIMIT. */
+static void look(Player *p, const PlayerInput *in, float step) {
+    const float angle = PHYS_LOOK_SPEED * step;
+
+    p->yaw   += in->look_x * angle;
+    p->pitch += in->look_y * angle;
 
     if (p->pitch >  PHYS_PITCH_LIMIT) p->pitch =  PHYS_PITCH_LIMIT;
     if (p->pitch < -PHYS_PITCH_LIMIT) p->pitch = -PHYS_PITCH_LIMIT;
+}
+
+void phys_update(Player *p, const PlayerInput *in, double dt) {
+    const float step = (float)dt;
+
+    move_horizontal(p, in, step);
+    move_vertical(p, in, step);
+    look(p, in, step);
 }

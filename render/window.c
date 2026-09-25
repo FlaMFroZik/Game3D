@@ -3,8 +3,10 @@
 
 #include "render/window.h"
 
+#define WIN_BUTTON_COUNT 8   /* кнопок мыши, которые запоминаем */
+
 static int key_state[WIN_KEY_COUNT];
-static int button_state[8];
+static int button_state[WIN_BUTTON_COUNT];
 
 static int quit_requested = 0;
 static int glfw_ready = 0;
@@ -45,7 +47,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 
 static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
     (void)window; (void)mods;
-    if (button >= 0 && button < (int)sizeof(button_state)) {
+    if (button >= 0 && button < WIN_BUTTON_COUNT) {
         button_state[button] = (action != GLFW_RELEASE);
     }
 }
@@ -56,11 +58,21 @@ int win_key_down(WinKey key) {
 }
 
 int win_button_down(int button) {
-    if (button < 0 || button >= (int)sizeof(button_state)) return 0;
+    if (button < 0 || button >= WIN_BUTTON_COUNT) return 0;
     return button_state[button];
 }
 
 /* ---------- Окно ---------- */
+
+/* Подсказки, общие для основного и запасного контекста. */
+static void set_base_hints(void) {
+    glfwWindowHint(GLFW_DEPTH_BITS, 24);
+    glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+    /* Окно можно свободно растягивать в обе стороны. Не задаём
+     * верхний предел: оно может быть больше стартового размера и даже
+     * занимать весь экран через кнопку разворачивания менеджера окон. */
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+}
 
 int win_init(WinWindow *w, int width, int height, const char *title) {
     memset(w, 0, sizeof(*w));
@@ -75,12 +87,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     }
     glfw_ready = 1;
 
-    glfwWindowHint(GLFW_DEPTH_BITS, 24);
-    glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
-    /* Окно можно свободно растягивать в обе стороны. Не задаём
-     * верхний предел: оно может быть больше стартового размера и даже
-     * занимать весь экран через кнопку разворачивания менеджера окон. */
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    set_base_hints();
 
     /* Рендер использует фиксированный конвейер (glBegin/glMatrixMode),
      * поэтому просим совместимый профиль 3.3. Если драйвер его не даст —
@@ -92,9 +99,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
 
     if (!w->window) {
         glfwDefaultWindowHints();
-        glfwWindowHint(GLFW_DEPTH_BITS, 24);
-        glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        set_base_hints();
         w->window = glfwCreateWindow(width, height, title, NULL, NULL);
         if (!w->window) {
             fprintf(stderr, "Cannot create window: %s\n", glfw_error_string());

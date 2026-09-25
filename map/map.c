@@ -44,8 +44,7 @@ int map_is_custom(void) {
     return g_map.is_loaded;
 }
 
-static int map_add_cube(float x, float y, float z, float sx, float sy, float sz,
-                        const Texture *texture, float tile, MapUvMode uv) {
+static int map_add_cube(const MapCube *cube) {
     if (g_map.count >= g_map.capacity) {
         size_t new_cap = (g_map.capacity == 0) ? 16 : g_map.capacity * 2;
         MapCube *new_cubes = realloc(g_map.cubes, new_cap * sizeof(MapCube));
@@ -56,17 +55,7 @@ static int map_add_cube(float x, float y, float z, float sx, float sy, float sz,
         g_map.capacity = new_cap;
     }
 
-    MapCube *cube = &g_map.cubes[g_map.count];
-    cube->x = x;
-    cube->y = y;
-    cube->z = z;
-    cube->sx = sx;
-    cube->sy = sy;
-    cube->sz = sz;
-    cube->texture = texture;
-    cube->tile = tile;
-    cube->uv = uv;
-    g_map.count++;
+    g_map.cubes[g_map.count++] = *cube;
     return 1;
 }
 
@@ -203,8 +192,26 @@ static int token_is_number(const char *token, float *out) {
     return 1;
 }
 
-static int starts_with(const char *text, const char *prefix) {
-    return strncmp(text, prefix, strlen(prefix)) == 0;
+/* Размер копии текстуры в метрах: неотрицательное число. */
+static int parse_tile(const char *text, float *out) {
+    float meters = 0.0f;
+    if (!token_is_number(text, &meters) || meters < 0.0f) return 0;
+    *out = meters;
+    return 1;
+}
+
+/* Значение опции key=value или NULL, если токен начинается не с key=. */
+static const char *option_value(const char *token, const char *key) {
+    size_t len = strlen(key);
+    if (strncmp(token, key, len) != 0 || token[len] != '=') return NULL;
+    return token + len + 1;
+}
+
+/* Меняет текстуру, только если новая загрузилась: битый файл оставляет
+ * прежнюю (текстуру по умолчанию). */
+static void set_texture(const Texture **texture, const char *name, int line_num) {
+    const Texture *tex = load_map_texture(name, line_num);
+    if (tex) *texture = tex;
 }
 
 /* ---------- Директивы карты ----------
@@ -226,23 +233,17 @@ static void apply_directive(char *tokens[], int count, int line_num, MapDefaults
             fprintf(stderr, "Warning: line %d: 'texture' needs a file name\n", line_num);
             return;
         }
-        const Texture *tex = load_map_texture(arg, line_num);
-        if (tex) def->texture = tex;
+        set_texture(&def->texture, arg, line_num);
         return;
     }
 
     if (strcmp(key, "tile") == 0) {
-        float meters = 0.0f;
         if (!arg) {                       /* без числа — размер по умолчанию */
             def->tile = 0.0f;
-            return;
-        }
-        if (!token_is_number(arg, &meters) || meters < 0.0f) {
+        } else if (!parse_tile(arg, &def->tile)) {
             fprintf(stderr, "Warning: line %d: 'tile' expects a size in meters, got '%s'\n",
                     line_num, arg);
-            return;
         }
-        def->tile = meters;
         return;
     }
 
@@ -273,42 +274,37 @@ static int parse_cube(char *tokens[], int count, int line_num, const MapDefaults
         }
     }
 
-    const Texture *texture = def->texture;
-    float tile = def->tile;
-    MapUvMode uv = def->uv;
+    MapCube cube;
+    cube.x = v[0];  cube.y = v[1];  cube.z = v[2];
+    cube.sx = v[3]; cube.sy = v[4]; cube.sz = v[5];
+    cube.texture = def->texture;
+    cube.tile = def->tile;
+    cube.uv = def->uv;
 
     for (int i = 6; i < count; i++) {
         const char *token = tokens[i];
+        const char *value;
 
-        const char *texture_key = NULL;
-        if (starts_with(token, "tex="))          texture_key = token + 4;
-        else if (starts_with(token, "texture=")) texture_key = token + 8;
-
-        if (texture_key) {
-            const Texture *tex = load_map_texture(texture_key, line_num);
-            if (tex) texture = tex;       /* битый файл — остаётся текстура по умолчанию */
-        } else if (starts_with(token, "tile=")) {
-            float meters = 0.0f;
-            if (!token_is_number(token + 5, &meters) || meters < 0.0f) {
+        if ((value = option_value(token, "tex")) || (value = option_value(token, "texture"))) {
+            set_texture(&cube.texture, value, line_num);
+        } else if ((value = option_value(token, "tile"))) {
+            if (!parse_tile(value, &cube.tile)) {
                 fprintf(stderr, "Warning: line %d: 'tile=' expects a size in meters, got '%s'\n",
-                        line_num, token + 5);
-            } else {
-                tile = meters;
+                        line_num, value);
             }
         } else if (strcmp(token, "stretch") == 0) {
-            uv = MAP_UV_STRETCH;
+            cube.uv = MAP_UV_STRETCH;
         } else if (strcmp(token, "repeat") == 0) {
-            uv = MAP_UV_TILE;
+            cube.uv = MAP_UV_TILE;
         } else if (strchr(token, '=') == NULL) {
             /* путь без ключа: 0 0 0 2 2 2 brick.raw */
-            const Texture *tex = load_map_texture(token, line_num);
-            if (tex) texture = tex;
+            set_texture(&cube.texture, token, line_num);
         } else {
             fprintf(stderr, "Warning: line %d: unknown cube option '%s'\n", line_num, token);
         }
     }
 
-    return map_add_cube(v[0], v[1], v[2], v[3], v[4], v[5], texture, tile, uv);
+    return map_add_cube(&cube);
 }
 
 int map_load(const char *filename) {
@@ -326,10 +322,7 @@ int map_load(const char *filename) {
 
     remember_map_dir(filename);
 
-    MapDefaults def;
-    def.texture = NULL;
-    def.tile = 0.0f;
-    def.uv = MAP_UV_TILE;
+    MapDefaults def = {NULL, 0.0f, MAP_UV_TILE};
 
     char line[MAP_LINE_MAX];
     int line_num = 0;
@@ -412,56 +405,31 @@ static void draw_cube(const MapCube *c, const Texture *tex) {
         v_z1 = prim_tex_v_tile(tex, z1, c->tile);
     }
 
+    const PrimVertex faces[6][4] = {
+        /* Передняя грань (Z+): U — по X, V — по Y (вверх) */
+        {{u_x0, v_y0, x0, y0, z1}, {u_x1, v_y0, x1, y0, z1},
+         {u_x1, v_y1, x1, y1, z1}, {u_x0, v_y1, x0, y1, z1}},
+        /* Задняя грань (Z-) */
+        {{u_x0, v_y0, x0, y0, z0}, {u_x0, v_y1, x0, y1, z0},
+         {u_x1, v_y1, x1, y1, z0}, {u_x1, v_y0, x1, y0, z0}},
+        /* Верхняя грань (Y+): U — по X, V — по Z */
+        {{u_x0, v_z0, x0, y1, z0}, {u_x0, v_z1, x0, y1, z1},
+         {u_x1, v_z1, x1, y1, z1}, {u_x1, v_z0, x1, y1, z0}},
+        /* Нижняя грань (Y-) */
+        {{u_x0, v_z0, x0, y0, z0}, {u_x1, v_z0, x1, y0, z0},
+         {u_x1, v_z1, x1, y0, z1}, {u_x0, v_z1, x0, y0, z1}},
+        /* Правая грань (X+): U — по Z, V — по Y */
+        {{u_z0, v_y0, x1, y0, z0}, {u_z0, v_y1, x1, y1, z0},
+         {u_z1, v_y1, x1, y1, z1}, {u_z1, v_y0, x1, y0, z1}},
+        /* Левая грань (X-): U — по Z, V — по Y */
+        {{u_z0, v_y0, x0, y0, z0}, {u_z1, v_y0, x0, y0, z1},
+         {u_z1, v_y1, x0, y1, z1}, {u_z0, v_y1, x0, y1, z0}},
+    };
+
     glBegin(GL_TRIANGLES);
-
-    /* Передняя грань (Z+): U — по X, V — по Y (вверх) */
-    glTexCoord2f(u_x0, v_y0); glVertex3f(x0, y0, z1);
-    glTexCoord2f(u_x1, v_y0); glVertex3f(x1, y0, z1);
-    glTexCoord2f(u_x1, v_y1); glVertex3f(x1, y1, z1);
-    glTexCoord2f(u_x0, v_y0); glVertex3f(x0, y0, z1);
-    glTexCoord2f(u_x1, v_y1); glVertex3f(x1, y1, z1);
-    glTexCoord2f(u_x0, v_y1); glVertex3f(x0, y1, z1);
-
-    /* Задняя грань (Z-) */
-    glTexCoord2f(u_x0, v_y0); glVertex3f(x0, y0, z0);
-    glTexCoord2f(u_x0, v_y1); glVertex3f(x0, y1, z0);
-    glTexCoord2f(u_x1, v_y1); glVertex3f(x1, y1, z0);
-    glTexCoord2f(u_x0, v_y0); glVertex3f(x0, y0, z0);
-    glTexCoord2f(u_x1, v_y1); glVertex3f(x1, y1, z0);
-    glTexCoord2f(u_x1, v_y0); glVertex3f(x1, y0, z0);
-
-    /* Верхняя грань (Y+): U — по X, V — по Z */
-    glTexCoord2f(u_x0, v_z0); glVertex3f(x0, y1, z0);
-    glTexCoord2f(u_x0, v_z1); glVertex3f(x0, y1, z1);
-    glTexCoord2f(u_x1, v_z1); glVertex3f(x1, y1, z1);
-    glTexCoord2f(u_x0, v_z0); glVertex3f(x0, y1, z0);
-    glTexCoord2f(u_x1, v_z1); glVertex3f(x1, y1, z1);
-    glTexCoord2f(u_x1, v_z0); glVertex3f(x1, y1, z0);
-
-    /* Нижняя грань (Y-) */
-    glTexCoord2f(u_x0, v_z0); glVertex3f(x0, y0, z0);
-    glTexCoord2f(u_x1, v_z0); glVertex3f(x1, y0, z0);
-    glTexCoord2f(u_x1, v_z1); glVertex3f(x1, y0, z1);
-    glTexCoord2f(u_x0, v_z0); glVertex3f(x0, y0, z0);
-    glTexCoord2f(u_x1, v_z1); glVertex3f(x1, y0, z1);
-    glTexCoord2f(u_x0, v_z1); glVertex3f(x0, y0, z1);
-
-    /* Правая грань (X+): U — по Z, V — по Y */
-    glTexCoord2f(u_z0, v_y0); glVertex3f(x1, y0, z0);
-    glTexCoord2f(u_z0, v_y1); glVertex3f(x1, y1, z0);
-    glTexCoord2f(u_z1, v_y1); glVertex3f(x1, y1, z1);
-    glTexCoord2f(u_z0, v_y0); glVertex3f(x1, y0, z0);
-    glTexCoord2f(u_z1, v_y1); glVertex3f(x1, y1, z1);
-    glTexCoord2f(u_z1, v_y0); glVertex3f(x1, y0, z1);
-
-    /* Левая грань (X-): U — по Z, V — по Y */
-    glTexCoord2f(u_z0, v_y0); glVertex3f(x0, y0, z0);
-    glTexCoord2f(u_z1, v_y0); glVertex3f(x0, y0, z1);
-    glTexCoord2f(u_z1, v_y1); glVertex3f(x0, y1, z1);
-    glTexCoord2f(u_z0, v_y0); glVertex3f(x0, y0, z0);
-    glTexCoord2f(u_z1, v_y1); glVertex3f(x0, y1, z1);
-    glTexCoord2f(u_z0, v_y1); glVertex3f(x0, y1, z0);
-
+    for (int i = 0; i < 6; i++) {
+        prim_emit_quad(faces[i]);
+    }
     glEnd();
 }
 
@@ -484,37 +452,59 @@ void map_render(const Texture *fallback) {
     }
 }
 
+/* ---------- Коллизии ---------- */
+
+/* Границы куба по осям. Размеры в карте могут быть отрицательными
+ * (куб «растёт» в другую сторону), поэтому min/max упорядочиваются. */
+typedef struct {
+    float min_x, max_x;
+    float min_y, max_y;
+    float min_z, max_z;
+} CubeBounds;
+
+static void ordered(float a, float b, float *lo, float *hi) {
+    *lo = (a < b) ? a : b;
+    *hi = (a < b) ? b : a;
+}
+
+static CubeBounds cube_bounds(const MapCube *c) {
+    CubeBounds b;
+    ordered(c->x, c->x + c->sx, &b.min_x, &b.max_x);
+    ordered(c->y, c->y + c->sy, &b.min_y, &b.max_y);
+    ordered(c->z, c->z + c->sz, &b.min_z, &b.max_z);
+    return b;
+}
+
 static float clampf(float v, float min, float max) {
     if (v < min) return min;
     if (v > max) return max;
     return v;
 }
 
+/* Квадрат расстояния по горизонтали от точки до «следа» куба (0 — внутри). */
+static float footprint_dist_sq(const CubeBounds *b, float x, float z) {
+    float dx = x - clampf(x, b->min_x, b->max_x);
+    float dz = z - clampf(z, b->min_z, b->max_z);
+    return dx * dx + dz * dz;
+}
+
+/* Стена, если тело игрока пересекает куб по высоте и куб выше шага
+ * или нависает над ногами. */
+static int blocks_body(const CubeBounds *b, float feet_y) {
+    int overlaps = feet_y + COLL_HEIGHT > b->min_y + COLL_EPSILON
+                && feet_y < b->max_y - COLL_EPSILON;
+    int too_high = b->max_y - feet_y > COLL_STEP_HEIGHT
+                || feet_y < b->min_y - COLL_EPSILON;
+    return overlaps && too_high;
+}
+
 int map_point_blocked(float px, float pz, float bottom_y) {
     if (!g_map.is_loaded) return 0;
 
     for (size_t i = 0; i < g_map.count; i++) {
-        const MapCube *c = &g_map.cubes[i];
-        float min_x = c->x;
-        float max_x = c->x + c->sx;
-        if (min_x > max_x) { float t = min_x; min_x = max_x; max_x = t; }
-
-        float min_z = c->z;
-        float max_z = c->z + c->sz;
-        if (min_z > max_z) { float t = min_z; min_z = max_z; max_z = t; }
-
-        float min_y = c->y;
-        float max_y = c->y + c->sy;
-        if (min_y > max_y) { float t = min_y; min_y = max_y; max_y = t; }
-
-        if (px >= min_x && px <= max_x && pz >= min_z && pz <= max_z) {
-            /* Стена, если тело игрока пересекает куб по высоте и куб выше шага или нависает */
-            if (bottom_y + COLL_HEIGHT > min_y + COLL_EPSILON && bottom_y < max_y - COLL_EPSILON) {
-                if (max_y - bottom_y > COLL_STEP_HEIGHT || bottom_y < min_y - COLL_EPSILON) {
-                    return 1;
-                }
-            }
-        }
+        CubeBounds b = cube_bounds(&g_map.cubes[i]);
+        int inside = px >= b.min_x && px <= b.max_x && pz >= b.min_z && pz <= b.max_z;
+        if (inside && blocks_body(&b, bottom_y)) return 1;
     }
     return 0;
 }
@@ -523,31 +513,10 @@ int map_capsule_blocked(float cx, float cz, float feet_y) {
     if (!g_map.is_loaded) return 0;
 
     for (size_t i = 0; i < g_map.count; i++) {
-        const MapCube *c = &g_map.cubes[i];
-        float min_x = c->x;
-        float max_x = c->x + c->sx;
-        if (min_x > max_x) { float t = min_x; min_x = max_x; max_x = t; }
-
-        float min_z = c->z;
-        float max_z = c->z + c->sz;
-        if (min_z > max_z) { float t = min_z; min_z = max_z; max_z = t; }
-
-        float min_y = c->y;
-        float max_y = c->y + c->sy;
-        if (min_y > max_y) { float t = min_y; min_y = max_y; max_y = t; }
-
-        float nx = clampf(cx, min_x, max_x);
-        float nz = clampf(cz, min_z, max_z);
-        float dx = cx - nx;
-        float dz = cz - nz;
-
-        if (dx * dx + dz * dz < COLL_RADIUS * COLL_RADIUS) {
-            /* Проверяем пересечение цилиндра с кубом по высоте */
-            if (feet_y + COLL_HEIGHT > min_y + COLL_EPSILON && feet_y < max_y - COLL_EPSILON) {
-                if (max_y - feet_y > COLL_STEP_HEIGHT || feet_y < min_y - COLL_EPSILON) {
-                    return 1;
-                }
-            }
+        CubeBounds b = cube_bounds(&g_map.cubes[i]);
+        if (footprint_dist_sq(&b, cx, cz) < COLL_RADIUS * COLL_RADIUS
+            && blocks_body(&b, feet_y)) {
+            return 1;
         }
     }
     return 0;
@@ -556,37 +525,17 @@ int map_capsule_blocked(float cx, float cz, float feet_y) {
 float map_cylinder_ground_height(float cx, float cz, float radius, float current_feet_y, float default_y) {
     if (!g_map.is_loaded) return default_y;
 
+    /* Куб считается землёй под ногами, если его верх не выше ног + шаг. */
+    const float max_ground = current_feet_y + COLL_STEP_HEIGHT + COLL_EPSILON;
     float highest = default_y;
 
     for (size_t i = 0; i < g_map.count; i++) {
-        const MapCube *c = &g_map.cubes[i];
-        float min_x = c->x;
-        float max_x = c->x + c->sx;
-        if (min_x > max_x) { float t = min_x; min_x = max_x; max_x = t; }
-
-        float min_z = c->z;
-        float max_z = c->z + c->sz;
-        if (min_z > max_z) { float t = min_z; min_z = max_z; max_z = t; }
-
-        float min_y = c->y;
-        float max_y = c->y + c->sy;
-        if (min_y > max_y) { float t = min_y; min_y = max_y; max_y = t; }
-
-        float nx = clampf(cx, min_x, max_x);
-        float nz = clampf(cz, min_z, max_z);
-        float dx = cx - nx;
-        float dz = cz - nz;
-
-        if (dx * dx + dz * dz <= radius * radius) {
-            /* Куб считается землей под ногами, если его верх не выше ног + COLL_STEP_HEIGHT */
-            if (max_y <= current_feet_y + COLL_STEP_HEIGHT + COLL_EPSILON) {
-                if (max_y > highest) {
-                    highest = max_y;
-                }
-            }
+        CubeBounds b = cube_bounds(&g_map.cubes[i]);
+        if (footprint_dist_sq(&b, cx, cz) <= radius * radius
+            && b.max_y <= max_ground && b.max_y > highest) {
+            highest = b.max_y;
         }
     }
-
     return highest;
 }
 

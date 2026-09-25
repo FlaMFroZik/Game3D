@@ -4,79 +4,82 @@
 
 #include "image.h"
 
-/* ------------------------------------------------------------------
- * Форматы image.h:
- *   0 — RGB888   (по 32 бита на пиксель)
- *   1 — ARGB8888 (по 32 бита на пиксель)
- *   2 — RGB444   (по 12 бит на пиксель, вплотную)
- *   3 — ARGB4444 (по 16 бит на пиксель)
- * ------------------------------------------------------------------ */
-
-static int data_size(unsigned char format, int n) {
+/* Размер упакованных пикселей в байтах; 0 — неизвестный формат. */
+static size_t data_size(unsigned char format, size_t n) {
     switch (format) {
-        case 0: return n * 4;
-        case 1: return n * 4;
-        case 2: return (n * 12 + 7) / 8;
-        case 3: return n * 2;
+        case IMAGE_RGB888:
+        case IMAGE_ARGB8888: return n * 4;
+        case IMAGE_RGB444:   return (n * 12 + 7) / 8;
+        case IMAGE_ARGB4444: return n * 2;
+        default:             return 0;
     }
-    return 0;
+}
+
+static size_t pixel_count(const Image *img) {
+    return (size_t)img->x * (size_t)img->y;
 }
 
 /* Сырой (упакованный) пиксель i. */
-static int raw_pixel(const Image *img, int i) {
-    int total = (img->x * img->y * 12 + 7) / 8;
+static uint32_t raw_pixel(const Image *img, int i) {
     switch (img->format) {
-        case 0: case 1: return ((int*)img->data)[i];
-        case 2: {
-            const uint8_t *p = (const uint8_t*)img->data;
-            int bit = i * 12;
-            int byte = bit / 8;
-            int shift = bit % 8;
+        case IMAGE_RGB888:
+        case IMAGE_ARGB8888:
+            return ((const uint32_t *)img->data)[i];
+
+        case IMAGE_RGB444: {
+            const uint8_t *p = (const uint8_t *)img->data;
+            const size_t total = data_size(IMAGE_RGB444, pixel_count(img));
+            const size_t bit = (size_t)i * 12;
+            const size_t byte = bit / 8;
+            const unsigned shift = (unsigned)(bit % 8);
+
             /* не читать за конец буфера на последнем пикселе */
             uint32_t v = p[byte];
             if (byte + 1 < total) v |= (uint32_t)p[byte + 1] << 8;
             if (byte + 2 < total) v |= (uint32_t)p[byte + 2] << 16;
-            return (v >> shift) & 0x0FFF;
+            return (v >> shift) & 0x0FFFu;
         }
-        case 3: return ((unsigned short*)img->data)[i];
+
+        case IMAGE_ARGB4444:
+            return ((const uint16_t *)img->data)[i];
+
+        default:
+            return 0;
     }
-    return 0;
 }
 
-static void unpack_rgb888(int px, uint8_t *r, uint8_t *g, uint8_t *b) {
-    *r = (px >> 16) & 0xFF; *g = (px >> 8) & 0xFF; *b = px & 0xFF;
+/* Канал шириной 8 бит, начиная с бита shift. */
+static uint8_t channel8(uint32_t px, unsigned shift) {
+    return (uint8_t)((px >> shift) & 0xFFu);
 }
 
-static void unpack_argb888(int px, uint8_t *a, uint8_t *r, uint8_t *g, uint8_t *b) {
-    *a = (px >> 24) & 0xFF; *r = (px >> 16) & 0xFF; *g = (px >> 8) & 0xFF; *b = px & 0xFF;
-}
-
-static void unpack_rgb444(int px, uint8_t *r, uint8_t *g, uint8_t *b) {
-    *r = ((px >> 8) & 0x0F) * 17; *g = ((px >> 4) & 0x0F) * 17; *b = (px & 0x0F) * 17;
-}
-
-static void unpack_argb4444(int px, uint8_t *a, uint8_t *r, uint8_t *g, uint8_t *b) {
-    *a = ((px >> 12) & 0x0F) * 17; *r = ((px >> 8) & 0x0F) * 17;
-    *g = ((px >> 4) & 0x0F) * 17; *b = (px & 0x0F) * 17;
+/* Канал шириной 4 бита, растянутый до 8 бит (0xF -> 0xFF). */
+static uint8_t channel4(uint32_t px, unsigned shift) {
+    return (uint8_t)(((px >> shift) & 0x0Fu) * 17u);
 }
 
 int image_load(const char *filename, Image *img) {
+    img->data = NULL;
+
     FILE *f = fopen(filename, "rb");
     if (!f) return 0;
-    if (fread(&img->x, sizeof(short), 1, f) != 1) { fclose(f); return 0; }
-    if (fread(&img->y, sizeof(short), 1, f) != 1) { fclose(f); return 0; }
-    if (fread(&img->format, sizeof(unsigned char), 1, f) != 1) { fclose(f); return 0; }
 
-    int n = img->x * img->y;
-    int sz = data_size(img->format, n);
-    img->data = malloc((size_t)sz);
-    if (!img->data) { fclose(f); return 0; }
+    int ok = fread(&img->x, sizeof(img->x), 1, f) == 1
+          && fread(&img->y, sizeof(img->y), 1, f) == 1
+          && fread(&img->format, sizeof(img->format), 1, f) == 1
+          && img->x > 0 && img->y > 0;
 
-    if (fread(img->data, 1, (size_t)sz, f) != (size_t)sz) {
-        free(img->data); img->data = NULL; fclose(f); return 0;
+    const size_t size = ok ? data_size(img->format, pixel_count(img)) : 0;
+    ok = ok && size > 0;
+
+    if (ok) {
+        img->data = malloc(size);
+        ok = img->data && fread(img->data, 1, size, f) == size;
     }
     fclose(f);
-    return 1;
+
+    if (!ok) image_free(img);
+    return ok;
 }
 
 void image_free(Image *img) {
@@ -84,16 +87,33 @@ void image_free(Image *img) {
     img->data = NULL;
 }
 
+int image_has_alpha(const Image *img) {
+    return img->format == IMAGE_ARGB8888 || img->format == IMAGE_ARGB4444;
+}
+
 void image_get_pixel(const Image *img, int i,
                      uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) {
-    int px = raw_pixel(img, i);
+    const uint32_t px = raw_pixel(img, i);
+
     *r = *g = *b = 0;
     *a = 255;
+
     switch (img->format) {
-        case 0: unpack_rgb888(px, r, g, b); break;
-        case 1: unpack_argb888(px, a, r, g, b); break;
-        case 2: unpack_rgb444(px, r, g, b); break;
-        case 3: unpack_argb4444(px, a, r, g, b); break;
-        default: break;
+        case IMAGE_ARGB8888:
+            *a = channel8(px, 24);
+            /* fallthrough */
+        case IMAGE_RGB888:
+            *r = channel8(px, 16); *g = channel8(px, 8); *b = channel8(px, 0);
+            break;
+
+        case IMAGE_ARGB4444:
+            *a = channel4(px, 12);
+            /* fallthrough */
+        case IMAGE_RGB444:
+            *r = channel4(px, 8); *g = channel4(px, 4); *b = channel4(px, 0);
+            break;
+
+        default:
+            break;
     }
 }
