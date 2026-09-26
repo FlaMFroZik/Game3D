@@ -45,7 +45,7 @@ static int same_text(const char *a, const char *b) {
 static int is_map_file(const char *name) {
     const char *dot = strrchr(name, '.');
     if (!dot || dot == name) return 0;
-    return same_text(dot, ".map") || same_text(dot, ".txt");
+    return same_text(dot, ".tfm");
 }
 
 /* ---------- Каталог с игрой ---------- */
