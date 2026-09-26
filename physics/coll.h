@@ -24,6 +24,11 @@ float coll_ground_height(float x, float z);
 /* Высота земли под коллайдером игрока с центром (cx, cz). */
 float coll_player_ground_height(float cx, float cz);
 
+/* Высота потолка над точкой мира (нижняя грань ближайшего куба выше ног). */
+float coll_ceiling_height(float x, float z);
+
+/* Высота потолка над коллайдером игрока с центром (cx, cz). */
+float coll_player_ceiling_height(float cx, float cz);
 
 /* Мешает ли рельеф точке на высоте bottom_y. */
 int coll_point_blocked(float px, float pz, float bottom_y);

@@ -368,6 +368,29 @@ int map_load(const char *filename) {
     return 1;
 }
 
+/* ---------- Границы и геометрия ---------- */
+
+/* Границы куба по осям. Размеры в карте могут быть отрицательными
+ * (куб «растёт» в другую сторону), поэтому min/max упорядочиваются. */
+typedef struct {
+    float min_x, max_x;
+    float min_y, max_y;
+    float min_z, max_z;
+} CubeBounds;
+
+static void ordered(float a, float b, float *lo, float *hi) {
+    *lo = (a < b) ? a : b;
+    *hi = (a < b) ? b : a;
+}
+
+static CubeBounds cube_bounds(const MapCube *c) {
+    CubeBounds b;
+    ordered(c->x, c->x + c->sx, &b.min_x, &b.max_x);
+    ordered(c->y, c->y + c->sy, &b.min_y, &b.max_y);
+    ordered(c->z, c->z + c->sz, &b.min_z, &b.max_z);
+    return b;
+}
+
 /* Отрисовка одного куба.
  *
  * По умолчанию текстура не растягивается на грань: её координаты считаются
@@ -377,59 +400,188 @@ int map_load(const char *filename) {
  * Размер одной копии — cube->tile метров (0 — PRIM_TEX_TILE_METERS).
  *
  * В режиме MAP_UV_STRETCH на каждой грани ровно одна копия текстуры:
- * все оси идут от 0 до 1, поэтому рисунок виден целиком. */
+ * все оси идут от 0 до 1, поэтому рисунок виден целиком.
+ *
+ * Для корректного рендеринга тумана на больших блоках грани разбиваются
+ * на сетку четырехугольников с шагом не более MAP_SUBDIV_STEP. */
+#define MAP_SUBDIV_STEP 1.0f
+#define MAP_MAX_SUBDIV  64
+
+static int calc_subdiv(float len) {
+    if (len <= 0.0f) return 1;
+    int n = (int)ceilf(len / MAP_SUBDIV_STEP);
+    if (n < 1) n = 1;
+    if (n > MAP_MAX_SUBDIV) n = MAP_MAX_SUBDIV;
+    return n;
+}
+
 static void draw_cube(const MapCube *c, const Texture *tex) {
-    float x0 = c->x;
-    float y0 = c->y;
-    float z0 = c->z;
-    float x1 = c->x + c->sx;
-    float y1 = c->y + c->sy;
-    float z1 = c->z + c->sz;
+    CubeBounds b = cube_bounds(c);
+    float x0 = b.min_x;
+    float x1 = b.max_x;
+    float y0 = b.min_y;
+    float y1 = b.max_y;
+    float z0 = b.min_z;
+    float z1 = b.max_z;
 
-    float u_x0, u_x1, u_z0, u_z1;
-    float v_y0, v_y1, v_z0, v_z1;
+    float len_x = x1 - x0;
+    float len_y = y1 - y0;
+    float len_z = z1 - z0;
 
-    if (c->uv == MAP_UV_STRETCH) {
-        u_x0 = u_z0 = v_y0 = v_z0 = 0.0f;
-        u_x1 = u_z1 = v_y1 = v_z1 = 1.0f;
-    } else {
-        /* координаты текстуры по каждой мировой оси: U и V считаются разными
-         * функциями (они совпадают только у квадратной текстуры) */
-        u_x0 = prim_tex_u_tile(tex, x0, c->tile);
-        u_x1 = prim_tex_u_tile(tex, x1, c->tile);
-        u_z0 = prim_tex_u_tile(tex, z0, c->tile);
-        u_z1 = prim_tex_u_tile(tex, z1, c->tile);
-        v_y0 = prim_tex_v_tile(tex, y0, c->tile);
-        v_y1 = prim_tex_v_tile(tex, y1, c->tile);
-        v_z0 = prim_tex_v_tile(tex, z0, c->tile);
-        v_z1 = prim_tex_v_tile(tex, z1, c->tile);
+    if (len_x <= 0.0f || len_y <= 0.0f || len_z <= 0.0f) {
+        return;
     }
 
-    const PrimVertex faces[6][4] = {
-        /* Передняя грань (Z+): U — по X, V — по Y (вверх) */
-        {{u_x0, v_y0, x0, y0, z1}, {u_x1, v_y0, x1, y0, z1},
-         {u_x1, v_y1, x1, y1, z1}, {u_x0, v_y1, x0, y1, z1}},
-        /* Задняя грань (Z-) */
-        {{u_x0, v_y0, x0, y0, z0}, {u_x0, v_y1, x0, y1, z0},
-         {u_x1, v_y1, x1, y1, z0}, {u_x1, v_y0, x1, y0, z0}},
-        /* Верхняя грань (Y+): U — по X, V — по Z */
-        {{u_x0, v_z0, x0, y1, z0}, {u_x0, v_z1, x0, y1, z1},
-         {u_x1, v_z1, x1, y1, z1}, {u_x1, v_z0, x1, y1, z0}},
-        /* Нижняя грань (Y-) */
-        {{u_x0, v_z0, x0, y0, z0}, {u_x1, v_z0, x1, y0, z0},
-         {u_x1, v_z1, x1, y0, z1}, {u_x0, v_z1, x0, y0, z1}},
-        /* Правая грань (X+): U — по Z, V — по Y */
-        {{u_z0, v_y0, x1, y0, z0}, {u_z0, v_y1, x1, y1, z0},
-         {u_z1, v_y1, x1, y1, z1}, {u_z1, v_y0, x1, y0, z1}},
-        /* Левая грань (X-): U — по Z, V — по Y */
-        {{u_z0, v_y0, x0, y0, z0}, {u_z1, v_y0, x0, y0, z1},
-         {u_z1, v_y1, x0, y1, z1}, {u_z0, v_y1, x0, y1, z0}},
-    };
+    int nx = calc_subdiv(len_x);
+    int ny = calc_subdiv(len_y);
+    int nz = calc_subdiv(len_z);
+
+    float dx = len_x / (float)nx;
+    float dy = len_y / (float)ny;
+    float dz = len_z / (float)nz;
+
+    int is_stretch = (c->uv == MAP_UV_STRETCH);
 
     glBegin(GL_TRIANGLES);
-    for (int i = 0; i < 6; i++) {
-        prim_emit_quad(faces[i]);
+
+    /* Передняя грань (Z+): U — по X, V — по Y */
+    for (int i = 0; i < nx; i++) {
+        float xa = x0 + (float)i * dx;
+        float xb = (i == nx - 1) ? x1 : (xa + dx);
+        float ua = is_stretch ? ((float)i / (float)nx) : prim_tex_u_tile(tex, xa, c->tile);
+        float ub = is_stretch ? ((float)(i + 1) / (float)nx) : prim_tex_u_tile(tex, xb, c->tile);
+
+        for (int j = 0; j < ny; j++) {
+            float ya = y0 + (float)j * dy;
+            float yb = (j == ny - 1) ? y1 : (ya + dy);
+            float va = is_stretch ? ((float)j / (float)ny) : prim_tex_v_tile(tex, ya, c->tile);
+            float vb = is_stretch ? ((float)(j + 1) / (float)ny) : prim_tex_v_tile(tex, yb, c->tile);
+
+            const PrimVertex quad[4] = {
+                {ua, va, xa, ya, z1},
+                {ub, va, xb, ya, z1},
+                {ub, vb, xb, yb, z1},
+                {ua, vb, xa, yb, z1}
+            };
+            prim_emit_quad(quad);
+        }
     }
+
+    /* Задняя грань (Z-): U — по X, V — по Y */
+    for (int i = 0; i < nx; i++) {
+        float xa = x0 + (float)i * dx;
+        float xb = (i == nx - 1) ? x1 : (xa + dx);
+        float ua = is_stretch ? ((float)i / (float)nx) : prim_tex_u_tile(tex, xa, c->tile);
+        float ub = is_stretch ? ((float)(i + 1) / (float)nx) : prim_tex_u_tile(tex, xb, c->tile);
+
+        for (int j = 0; j < ny; j++) {
+            float ya = y0 + (float)j * dy;
+            float yb = (j == ny - 1) ? y1 : (ya + dy);
+            float va = is_stretch ? ((float)j / (float)ny) : prim_tex_v_tile(tex, ya, c->tile);
+            float vb = is_stretch ? ((float)(j + 1) / (float)ny) : prim_tex_v_tile(tex, yb, c->tile);
+
+            const PrimVertex quad[4] = {
+                {ua, va, xa, ya, z0},
+                {ua, vb, xa, yb, z0},
+                {ub, vb, xb, yb, z0},
+                {ub, va, xb, ya, z0}
+            };
+            prim_emit_quad(quad);
+        }
+    }
+
+    /* Верхняя грань (Y+): U — по X, V — по Z */
+    for (int i = 0; i < nx; i++) {
+        float xa = x0 + (float)i * dx;
+        float xb = (i == nx - 1) ? x1 : (xa + dx);
+        float ua = is_stretch ? ((float)i / (float)nx) : prim_tex_u_tile(tex, xa, c->tile);
+        float ub = is_stretch ? ((float)(i + 1) / (float)nx) : prim_tex_u_tile(tex, xb, c->tile);
+
+        for (int k = 0; k < nz; k++) {
+            float za = z0 + (float)k * dz;
+            float zb = (k == nz - 1) ? z1 : (za + dz);
+            float va = is_stretch ? ((float)k / (float)nz) : prim_tex_v_tile(tex, za, c->tile);
+            float vb = is_stretch ? ((float)(k + 1) / (float)nz) : prim_tex_v_tile(tex, zb, c->tile);
+
+            const PrimVertex quad[4] = {
+                {ua, va, xa, y1, za},
+                {ua, vb, xa, y1, zb},
+                {ub, vb, xb, y1, zb},
+                {ub, va, xb, y1, za}
+            };
+            prim_emit_quad(quad);
+        }
+    }
+
+    /* Нижняя грань (Y-): U — по X, V — по Z */
+    for (int i = 0; i < nx; i++) {
+        float xa = x0 + (float)i * dx;
+        float xb = (i == nx - 1) ? x1 : (xa + dx);
+        float ua = is_stretch ? ((float)i / (float)nx) : prim_tex_u_tile(tex, xa, c->tile);
+        float ub = is_stretch ? ((float)(i + 1) / (float)nx) : prim_tex_u_tile(tex, xb, c->tile);
+
+        for (int k = 0; k < nz; k++) {
+            float za = z0 + (float)k * dz;
+            float zb = (k == nz - 1) ? z1 : (za + dz);
+            float va = is_stretch ? ((float)k / (float)nz) : prim_tex_v_tile(tex, za, c->tile);
+            float vb = is_stretch ? ((float)(k + 1) / (float)nz) : prim_tex_v_tile(tex, zb, c->tile);
+
+            const PrimVertex quad[4] = {
+                {ua, va, xa, y0, za},
+                {ub, va, xb, y0, za},
+                {ub, vb, xb, y0, zb},
+                {ua, vb, xa, y0, zb}
+            };
+            prim_emit_quad(quad);
+        }
+    }
+
+    /* Правая грань (X+): U — по Z, V — по Y */
+    for (int k = 0; k < nz; k++) {
+        float za = z0 + (float)k * dz;
+        float zb = (k == nz - 1) ? z1 : (za + dz);
+        float ua = is_stretch ? ((float)k / (float)nz) : prim_tex_u_tile(tex, za, c->tile);
+        float ub = is_stretch ? ((float)(k + 1) / (float)nz) : prim_tex_u_tile(tex, zb, c->tile);
+
+        for (int j = 0; j < ny; j++) {
+            float ya = y0 + (float)j * dy;
+            float yb = (j == ny - 1) ? y1 : (ya + dy);
+            float va = is_stretch ? ((float)j / (float)ny) : prim_tex_v_tile(tex, ya, c->tile);
+            float vb = is_stretch ? ((float)(j + 1) / (float)ny) : prim_tex_v_tile(tex, yb, c->tile);
+
+            const PrimVertex quad[4] = {
+                {ua, va, x1, ya, za},
+                {ua, vb, x1, yb, za},
+                {ub, vb, x1, yb, zb},
+                {ub, va, x1, ya, zb}
+            };
+            prim_emit_quad(quad);
+        }
+    }
+
+    /* Левая грань (X-): U — по Z, V — по Y */
+    for (int k = 0; k < nz; k++) {
+        float za = z0 + (float)k * dz;
+        float zb = (k == nz - 1) ? z1 : (za + dz);
+        float ua = is_stretch ? ((float)k / (float)nz) : prim_tex_u_tile(tex, za, c->tile);
+        float ub = is_stretch ? ((float)(k + 1) / (float)nz) : prim_tex_u_tile(tex, zb, c->tile);
+
+        for (int j = 0; j < ny; j++) {
+            float ya = y0 + (float)j * dy;
+            float yb = (j == ny - 1) ? y1 : (ya + dy);
+            float va = is_stretch ? ((float)j / (float)ny) : prim_tex_v_tile(tex, ya, c->tile);
+            float vb = is_stretch ? ((float)(j + 1) / (float)ny) : prim_tex_v_tile(tex, yb, c->tile);
+
+            const PrimVertex quad[4] = {
+                {ua, va, x0, ya, za},
+                {ub, va, x0, ya, zb},
+                {ub, vb, x0, yb, zb},
+                {ua, vb, x0, yb, za}
+            };
+            prim_emit_quad(quad);
+        }
+    }
+
     glEnd();
 }
 
@@ -453,27 +605,6 @@ void map_render(const Texture *fallback) {
 }
 
 /* ---------- Коллизии ---------- */
-
-/* Границы куба по осям. Размеры в карте могут быть отрицательными
- * (куб «растёт» в другую сторону), поэтому min/max упорядочиваются. */
-typedef struct {
-    float min_x, max_x;
-    float min_y, max_y;
-    float min_z, max_z;
-} CubeBounds;
-
-static void ordered(float a, float b, float *lo, float *hi) {
-    *lo = (a < b) ? a : b;
-    *hi = (a < b) ? b : a;
-}
-
-static CubeBounds cube_bounds(const MapCube *c) {
-    CubeBounds b;
-    ordered(c->x, c->x + c->sx, &b.min_x, &b.max_x);
-    ordered(c->y, c->y + c->sy, &b.min_y, &b.max_y);
-    ordered(c->z, c->z + c->sz, &b.min_z, &b.max_z);
-    return b;
-}
 
 static float clampf(float v, float min, float max) {
     if (v < min) return min;
@@ -501,6 +632,12 @@ static int blocks_body(const CubeBounds *b, float feet_y) {
 int map_point_blocked(float px, float pz, float bottom_y) {
     if (!g_map.is_loaded) return 0;
 
+    float gh = map_ground_height(px, pz, bottom_y, 0.0f);
+    float ch = map_ceiling_height(px, pz, bottom_y);
+    if (gh + COLL_HEIGHT > ch + COLL_EPSILON) {
+        return 1;
+    }
+
     for (size_t i = 0; i < g_map.count; i++) {
         CubeBounds b = cube_bounds(&g_map.cubes[i]);
         int inside = px >= b.min_x && px <= b.max_x && pz >= b.min_z && pz <= b.max_z;
@@ -512,11 +649,25 @@ int map_point_blocked(float px, float pz, float bottom_y) {
 int map_capsule_blocked(float cx, float cz, float feet_y) {
     if (!g_map.is_loaded) return 0;
 
+    float gh = map_cylinder_ground_height(cx, cz, COLL_RADIUS, feet_y, 0.0f);
+    float ch = map_cylinder_ceiling_height(cx, cz, COLL_RADIUS, feet_y);
+
+    /* Недостаточный зазор между полом и потолком для роста игрока */
+    if (gh + COLL_HEIGHT > ch + COLL_EPSILON) {
+        return 1;
+    }
+
+    float eff_feet = fmaxf(feet_y, gh);
+    if (eff_feet + COLL_HEIGHT > ch + COLL_EPSILON) {
+        return 1;
+    }
+
     for (size_t i = 0; i < g_map.count; i++) {
         CubeBounds b = cube_bounds(&g_map.cubes[i]);
-        if (footprint_dist_sq(&b, cx, cz) < COLL_RADIUS * COLL_RADIUS
-            && blocks_body(&b, feet_y)) {
-            return 1;
+        if (footprint_dist_sq(&b, cx, cz) < COLL_RADIUS * COLL_RADIUS) {
+            if (blocks_body(&b, feet_y) || blocks_body(&b, eff_feet)) {
+                return 1;
+            }
         }
     }
     return 0;
@@ -528,17 +679,42 @@ float map_cylinder_ground_height(float cx, float cz, float radius, float current
     /* Куб считается землёй под ногами, если его верх не выше ног + шаг. */
     const float max_ground = current_feet_y + COLL_STEP_HEIGHT + COLL_EPSILON;
     float highest = default_y;
+    int found = 0;
 
     for (size_t i = 0; i < g_map.count; i++) {
         CubeBounds b = cube_bounds(&g_map.cubes[i]);
         if (footprint_dist_sq(&b, cx, cz) <= radius * radius
-            && b.max_y <= max_ground && b.max_y > highest) {
-            highest = b.max_y;
+            && b.max_y <= max_ground) {
+            if (!found || b.max_y > highest) {
+                highest = b.max_y;
+                found = 1;
+            }
         }
     }
-    return highest;
+    return found ? highest : default_y;
 }
 
 float map_ground_height(float px, float pz, float current_feet_y, float default_y) {
     return map_cylinder_ground_height(px, pz, 0.0f, current_feet_y, default_y);
+}
+
+float map_cylinder_ceiling_height(float cx, float cz, float radius, float current_feet_y) {
+    if (!g_map.is_loaded) return INFINITY;
+
+    /* Потолком считается нижняя грань куба, находящаяся выше уровня ног */
+    const float min_ceiling = current_feet_y + COLL_EPSILON;
+    float lowest = INFINITY;
+
+    for (size_t i = 0; i < g_map.count; i++) {
+        CubeBounds b = cube_bounds(&g_map.cubes[i]);
+        if (footprint_dist_sq(&b, cx, cz) <= radius * radius
+            && b.min_y >= min_ceiling && b.min_y < lowest) {
+            lowest = b.min_y;
+        }
+    }
+    return lowest;
+}
+
+float map_ceiling_height(float px, float pz, float current_feet_y) {
+    return map_cylinder_ceiling_height(px, pz, 0.0f, current_feet_y);
 }
