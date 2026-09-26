@@ -46,9 +46,15 @@ static void move_horizontal(Player *p, const PlayerInput *in, float step) {
 
 /* Гравитация, приземление и прыжок. */
 static void move_vertical(Player *p, const PlayerInput *in, float step) {
-    /* Земля под игроком уже с учётом горизонтального шага. */
-    coll_set_feet_y(feet_y(p));
-    const float target_y = coll_player_ground_height(p->x, p->z) + COLL_HEIGHT * 0.5f;
+    /* Земля и потолок под/над игроком уже с учётом горизонтального шага. */
+    const float cur_feet = feet_y(p);
+    coll_set_feet_y(cur_feet);
+
+    const float ground_y = coll_player_ground_height(p->x, p->z);
+    const float ceiling_y = coll_player_ceiling_height(p->x, p->z);
+
+    const float target_y = ground_y + COLL_HEIGHT * 0.5f;
+    const float max_y = ceiling_y - COLL_HEIGHT * 0.5f;
     const int on_ground = (fabsf(p->y - target_y) < COLL_EPSILON);
 
     if (on_ground) {
@@ -67,14 +73,27 @@ static void move_vertical(Player *p, const PlayerInput *in, float step) {
         }
 
         /* Прыжок, если пробел зажат в момент приземления. */
-        if (in->jump) {
+        if (in->jump && target_y < max_y - COLL_EPSILON) {
             p->vel_y = PHYS_JUMP_FORCE;
             next_y = target_y + p->vel_y * step;
         }
-    } else if (on_ground && in->jump) {
+    } else if (on_ground && in->jump && target_y < max_y - COLL_EPSILON) {
         /* Прыжок с земли. */
         p->vel_y = PHYS_JUMP_FORCE;
         next_y = p->y + p->vel_y * step;
+    }
+
+    /* Столкновение с потолком (низом блоков сверху). */
+    if (next_y >= max_y) {
+        next_y = max_y;
+        if (p->vel_y > 0.0f) {
+            p->vel_y = 0.0f;
+        }
+    }
+
+    /* Если зазор между полом и потолком меньше роста игрока, удерживаем на полу. */
+    if (next_y < target_y) {
+        next_y = target_y;
     }
 
     p->y = next_y;

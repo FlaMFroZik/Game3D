@@ -53,6 +53,20 @@ float coll_player_ground_height(float cx, float cz) {
     return highest;
 }
 
+float coll_ceiling_height(float x, float z) {
+    if (map_is_custom()) {
+        return map_ceiling_height(x, z, s_current_feet_y);
+    }
+    return INFINITY;
+}
+
+float coll_player_ceiling_height(float cx, float cz) {
+    if (map_is_custom()) {
+        return map_cylinder_ceiling_height(cx, cz, COLL_RADIUS, s_current_feet_y);
+    }
+    return INFINITY;
+}
+
 int coll_point_blocked(float px, float pz, float bottom_y) {
     if (map_point_blocked(px, pz, bottom_y)) {
         return 1;

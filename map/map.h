@@ -104,4 +104,16 @@ float map_ground_height(float px, float pz, float current_feet_y, float default_
  */
 float map_cylinder_ground_height(float cx, float cz, float radius, float current_feet_y, float default_y);
 
+/* Высота нижней грани самого низкого куба над точкой (px, pz),
+ * находящегося выше current_feet_y.
+ * Если над точкой нет кубов, возвращает INFINITY.
+ */
+float map_ceiling_height(float px, float pz, float current_feet_y);
+
+/* Высота нижней грани самого низкого куба над цилиндром коллайдера (cx, cz, radius),
+ * находящегося выше current_feet_y.
+ * Если над цилиндром нет кубов, возвращает INFINITY.
+ */
+float map_cylinder_ceiling_height(float cx, float cz, float radius, float current_feet_y);
+
 #endif /* MAP_H */
