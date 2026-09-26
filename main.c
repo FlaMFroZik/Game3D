@@ -18,6 +18,14 @@
 #define PHYSICS_STEP  (1.0 / PHYSICS_HZ)
 #define MAX_FRAME_DELTA 0.2   /* защита от «скачка» после зависания */
 
+/* FPS усредняется на коротком интервале: число остаётся читаемым и не
+ * скачет при каждом отдельном кадре. */
+#define FPS_UPDATE_INTERVAL 0.5
+#define FPS_PANEL_MARGIN     10.0f
+#define FPS_PANEL_PAD_X       8.0f
+#define FPS_PANEL_PAD_Y       4.0f
+#define FPS_TEXT_SCALE        0.85f
+
 /* Шрифт интерфейса ищем рядом с игрой, а затем в текущем каталоге —
  * так меню работает и из собранного каталога, и из дерева исходников. */
 #define FONT_DIR  "assets/fonts"
@@ -126,6 +134,53 @@ static void draw_sky(Renderer *renderer, const WinWindow *window) {
 
 static float smaller(float a, float b) {
     return (a < b) ? a : b;
+}
+
+/* ---------- Счётчик кадров ---------- */
+
+typedef struct {
+    double sample_start;
+    unsigned int frames;
+    int value;
+} FpsCounter;
+
+static void fps_init(FpsCounter *counter, double now) {
+    counter->sample_start = now;
+    counter->frames = 0;
+    counter->value = 0;
+}
+
+static void fps_update(FpsCounter *counter, double now) {
+    counter->frames++;
+
+    const double elapsed = now - counter->sample_start;
+    if (elapsed >= FPS_UPDATE_INTERVAL) {
+        counter->value = (int)((double)counter->frames / elapsed + 0.5);
+        counter->sample_start = now;
+        counter->frames = 0;
+    }
+}
+
+/* Рисуется последним поверх мира и меню, в правом верхнем углу. */
+static void draw_fps(const Ui *ui, const FpsCounter *counter) {
+    char text[32];
+    snprintf(text, sizeof text, "FPS: %d", counter->value);
+
+    const float s = ui->scale;
+    const float pad_x = FPS_PANEL_PAD_X * s;
+    const float pad_y = FPS_PANEL_PAD_Y * s;
+    const float text_w = ui_text_width(ui, text, FPS_TEXT_SCALE);
+    const float text_h = ui_text_height(ui, FPS_TEXT_SCALE);
+    const float panel_w = text_w + 2.0f * pad_x;
+    const float panel_h = text_h + 2.0f * pad_y;
+    const float margin = FPS_PANEL_MARGIN * s;
+    const UiRect panel = ui_rect((float)ui->width - margin - panel_w,
+                                 margin, panel_w, panel_h);
+
+    ui_fill(panel, UI_COLOR_PANEL);
+    ui_border(panel, MENU_EDGE(s), UI_COLOR_PANEL_EDGE);
+    ui_label(ui, panel.x + pad_x, panel.y + pad_y, FPS_TEXT_SCALE,
+             UI_COLOR_TEXT, text);
 }
 
 /* ---------- Экраны меню ---------- */
@@ -340,6 +395,8 @@ int main(int argc, char **argv) {
 
     double last_time = win_time_seconds();
     double accumulator = 0.0;
+    FpsCounter fps;
+    fps_init(&fps, last_time);
 
     /* Карта в командной строке запускает игру сразу, минуя меню. */
     if (map_file) {
@@ -348,10 +405,12 @@ int main(int argc, char **argv) {
     }
 
     while (screen != SCREEN_QUIT && !win_poll(&window)) {
+        const double frame_time = win_time_seconds();
+        fps_update(&fps, frame_time);
+
         if (screen == SCREEN_PLAYING) {
-            double now = win_time_seconds();
-            double delta = now - last_time;
-            last_time = now;
+            double delta = frame_time - last_time;
+            last_time = frame_time;
 
             if (delta > MAX_FRAME_DELTA) delta = MAX_FRAME_DELTA;
             if (delta < 0.0) delta = 0.0;
@@ -372,6 +431,14 @@ int main(int argc, char **argv) {
                 screen = SCREEN_PAUSE;
                 win_reset_input();
             }
+
+            int width, height;
+            win_size(&window, &width, &height);
+            Ui hud;
+            ui_frame_begin(&hud, font, width, height);
+            draw_fps(&hud, &fps);
+            ui_frame_end();
+
             win_swap(&window);
             continue;
         }
@@ -410,6 +477,7 @@ int main(int argc, char **argv) {
                 break;
         }
 
+        draw_fps(&ui, &fps);
         ui_frame_end();
         win_swap(&window);
 
