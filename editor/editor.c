@@ -15,8 +15,10 @@
 #define ED_MOVE_SPEED   8.0f     /* полёт камеры, метров в секунду */
 #define ED_FAST_FACTOR  3.0f     /* ускорение с Shift */
 #define ED_LOOK_SENS    0.0025f  /* радиан на пиксель движения мыши */
-#define ED_MIN_Y       -20.0f    /* ниже камеру не пускаем: там ничего нет */
-#define ED_MAX_Y        120.0f
+
+/* Камера редактора всегда работает в режиме noclip. В отличие от игрока,
+ * она не должна останавливаться о карту, пол или невидимые границы высоты:
+ * дизайнеру нужно свободно осматривать и редактировать любой объём сцены. */
 
 /* ---------- Служебная геометрия ---------- */
 
@@ -192,6 +194,21 @@ void editor_init_loaded(Editor *ed, const char *file) {
 
 /* ---------- Кадр ---------- */
 
+/* Движение камеры редактора намеренно не знает о физике карты. Не вызываем
+ * coll_move/map_capsule_blocked и не проверяем g_map: это не игрок, а
+ * инструмент, который должен проходить сквозь любые кубы. */
+static void editor_move_noclip(Editor *ed, float forward, float strafe,
+                               float lift, float distance) {
+    const float dir_x = sinf(ed->cam.yaw);
+    const float dir_z = -cosf(ed->cam.yaw);
+    const float right_x = -dir_z;
+    const float right_z = dir_x;
+
+    ed->cam.x += (forward * dir_x + strafe * right_x) * distance;
+    ed->cam.z += (forward * dir_z + strafe * right_z) * distance;
+    ed->cam.y += lift * distance;
+}
+
 void editor_update(Editor *ed, double dt) {
     const float step = (float)dt;
 
@@ -210,15 +227,9 @@ void editor_update(Editor *ed, double dt) {
     float speed = ED_MOVE_SPEED * step;
     if (win_key_down(WIN_KEY_SHIFT)) speed *= ED_FAST_FACTOR;
 
-    const float dir_x =  sinf(ed->cam.yaw);
-    const float dir_z = -cosf(ed->cam.yaw);
-    const float right_x = -dir_z;
-    const float right_z =  dir_x;
-
-    ed->cam.x += (forward * dir_x + strafe * right_x) * speed;
-    ed->cam.z += (forward * dir_z + strafe * right_z) * speed;
-    ed->cam.y += lift * speed;
-    ed->cam.y = clampf(ed->cam.y, ED_MIN_Y, ED_MAX_Y);
+    /* Свободный noclip-полёт: кубы, пол и высотные границы не влияют на
+     * перемещение камеры. Это специально отличается от физики игрока. */
+    editor_move_noclip(ed, forward, strafe, lift, speed);
 
     /* Колесо: высота кисти; с Shift — сечение. */
     const int wheel = (int)win_scroll_delta();
