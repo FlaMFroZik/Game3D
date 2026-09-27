@@ -2,10 +2,7 @@
 
 #include <GL/gl.h>
 
-#include "map/gen.h"
 #include "map/map.h"
-#include "physics/coll.h"
-#include "physics/physics.h"
 #include "render/prim.h"
 #include "render/render.h"
 
@@ -25,8 +22,8 @@ static void render_perspective(GLdouble fov, GLdouble aspect,
     glFrustum(-right, right, -top, top, near_plane, far_plane);
 }
 
-/* Замена gluLookAt без зависимости от GLU. Направление взгляда уже единичное
- * (его создаёт phys_view_dir), поэтому здесь нужен только базис камеры. */
+/* Замена gluLookAt без зависимости от GLU. Направление взгляда уже
+ * единичное (его создаёт render_view_dir), нужен только базис камеры. */
 static void render_look_at(float eye_x, float eye_y, float eye_z,
                            float forward_x, float forward_y, float forward_z) {
     const float up_x = 0.0f;
@@ -67,27 +64,13 @@ static float clampf(float v, float lo, float hi) {
     return v;
 }
 
-/* Камера стоит в середине коллайдера и при наклоне взгляда не сдвигается
- * (см. physics), поэтому её высота — это высота центра, спроецированная
- * на вертикаль. Нужна, чтобы посчитать, докуда достаёт луч в горизонт. */
-static double render_eye_height(const Player *player) {
-    const double half_height = 0.5 * (double)COLL_HEIGHT;
-    const double pitch = (double)clampf(player->pitch, -PHYS_PITCH_LIMIT, PHYS_PITCH_LIMIT);
+void render_view_dir(const Camera *cam, float *dx, float *dy, float *dz) {
+    const float pitch = clampf(cam->pitch, -RENDER_PITCH_LIMIT, RENDER_PITCH_LIMIT);
+    const float cp = cosf(pitch);
 
-    return (double)player->y - half_height * cos(pitch);
-}
-
-float render_view_radius(const Player *player) {
-    /* Всё, что дальше конца тумана, залито его цветом и на картинке уже не
-     * видно. Значит, мир должен быть готов ровно на эту глубину — и ни
-     * метром меньше, иначе на краю кадра появится обрыв рельефа.
-     * Пиксель на горизонте уходит вдаль тем дальше по земле, чем выше
-     * камера, отсюда гипотенуза. От размера окна радиус не зависит: широкое
-     * окно показывает больше мира по сторонам, а не «за туман». */
-    const double eye_y = render_eye_height(player);
-    const double fog_end = (double)RENDER_FOG_END;
-
-    return (float)(sqrt(eye_y * eye_y + fog_end * fog_end) + RENDER_VIEW_MARGIN);
+    *dx = sinf(cam->yaw) * cp;
+    *dy = sinf(pitch);
+    *dz = -cosf(cam->yaw) * cp;
 }
 
 int render_init(Renderer *r, const char *texture_file) {
@@ -100,17 +83,26 @@ int render_init(Renderer *r, const char *texture_file) {
     r->near_plane = RENDER_NEAR;
     r->far_plane = RENDER_FAR;
 
-    r->texture = prim_load_texture(texture_file);
+    r->texture.id = 0;
+    if (texture_file && texture_file[0] != '\0') {
+        r->texture = prim_load_texture(texture_file);
+    }
+
+    /* Редактор должен работать и без текстуры в командной строке:
+     * кубы без своей текстуры рисуются встроенной «шахматкой». */
+    if (r->texture.id == 0) {
+        r->texture = prim_make_checker_texture();
+    }
     return r->texture.id != 0;
 }
 
 void render_setup_gl(void) {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_FOG);
-    glFogi(GL_FOG_MODE, GL_LINEAR);   /* либо GL_EXP / GL_EXP2 (тогда нужен GL_FOG_DENSITY) */
+    glFogi(GL_FOG_MODE, GL_LINEAR);
     glFogf(GL_FOG_START, RENDER_FOG_START);
     glFogf(GL_FOG_END,   RENDER_FOG_END);
-    glHint(GL_FOG_HINT, GL_NICEST);   /* расчёт на каждый фрагмент, если драйвер позволяет */
+    glHint(GL_FOG_HINT, GL_NICEST);
 }
 
 void render_shutdown(Renderer *r) {
@@ -119,16 +111,14 @@ void render_shutdown(Renderer *r) {
 
 void render_clear(const Renderer *r) {
     glClearColor(r->sky[0], r->sky[1], r->sky[2], r->sky[3]);  /* небо */
-    /* Цвет тумана = цвет неба => горизонт бесшовный, а дальние
-     * края чанков плавно растворяются. */
+    /* Цвет тумана = цвет неба => горизонт бесшовный. */
     glFogfv(GL_FOG_COLOR, r->sky);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
-void render_camera(const Renderer *r, const Player *player, int width, int height) {
+void render_camera(const Renderer *r, const Camera *cam, int width, int height) {
     /* Область отрисовки — окно целиком. Без этого OpenGL рисует в размер,
-     * который был при создании контекста: растянутое окно показывало бы
-     * картинку в углу, а остальное оставалось чёрным. */
+     * который был при создании контекста. */
     if (width <= 0 || height <= 0) {
         width = 1;
         height = 1;
@@ -145,69 +135,17 @@ void render_camera(const Renderer *r, const Player *player, int width, int heigh
     glLoadIdentity();
 
     float dir_x, dir_y, dir_z;
-    phys_view_dir(player, &dir_x, &dir_y, &dir_z);
-    render_look_at(player->x, player->y, player->z, dir_x, dir_y, dir_z);
+    render_view_dir(cam, &dir_x, &dir_y, &dir_z);
+    render_look_at(cam->x, cam->y, cam->z, dir_x, dir_y, dir_z);
 }
 
-/* Клетка видна, если её ближайшая к игроку точка не дальше радиуса
- * видимости (reach_sq — его квадрат). */
-static int cell_visible(const CellQuad *q, const Player *player, float reach_sq) {
-    float dx = player->x - clampf(player->x, q->x0, q->x1);
-    float dz = player->z - clampf(player->z, q->z0, q->z1);
-    return dx * dx + dz * dz <= reach_sq;
-}
-
-/* Процедурный рельеф: все загруженные чанки вокруг игрока.
- *
- * Клетки за пределами радиуса видимости пропускаются: там они всё равно
- * залиты цветом тумана, а платить за них кадром не нужно. Границы
- * «нарисовано» и «видно» совпадают, поэтому обрыва рельефа в кадре не
- * бывает при любом размере окна. */
-static void draw_terrain(const Renderer *r, const Player *player) {
-    const float reach = render_view_radius(player);
-    const float reach_sq = reach * reach;
-
-    glBindTexture(GL_TEXTURE_2D, r->texture.id);
-
-    for (int i = 0; i < gen_chunk_count(); i++) {
-        const Chunk *c = gen_chunk_at(i);
-
-        for (int x = 0; x < GEN_CHUNK_SIZE; x++) {
-            for (int z = 0; z < GEN_CHUNK_SIZE; z++) {
-                CellQuad quad;
-
-                quad.x0 = (float)(c->cx * GEN_CHUNK_SIZE + x) * GEN_CELL_SIZE;
-                quad.z0 = (float)(c->cz * GEN_CHUNK_SIZE + z) * GEN_CELL_SIZE;
-                quad.x1 = quad.x0 + GEN_CELL_SIZE;
-                quad.z1 = quad.z0 + GEN_CELL_SIZE;
-
-                if (!cell_visible(&quad, player, reach_sq)) continue;
-
-                quad.y00 = gen_chunk_y(c, x,     z);
-                quad.y10 = gen_chunk_y(c, x + 1, z);
-                quad.y01 = gen_chunk_y(c, x,     z + 1);
-                quad.y11 = gen_chunk_y(c, x + 1, z + 1);
-
-                prim_draw_cell(&r->texture, &quad);
-            }
-        }
-    }
-}
-
-void render_world(const Renderer *r, const Player *player) {
+void render_world(const Renderer *r) {
     glEnable(GL_TEXTURE_2D);
 
-    /* Карта и процедурная генерация взаимно исключают: генерация —
-     * fallback, её рисуем только когда карта из файла не загружена,
-     * иначе рельеф накладывается на кубы карты. */
-    if (map_is_custom()) {
-        /* У кубов карты могут быть свои текстуры, поэтому map_render сам
-         * привязывает нужную текстуру каждому кубу; r->texture — та, которой
-         * нарисуются кубы без своей. */
-        map_render(&r->texture);
-    } else {
-        draw_terrain(r, player);
-    }
+    /* У кубов карты могут быть свои текстуры, поэтому map_render сам
+     * привязывает нужную текстуру каждому кубу; r->texture — та, которой
+     * нарисуются кубы без своей. */
+    map_render(&r->texture);
 
     glDisable(GL_TEXTURE_2D);
 }

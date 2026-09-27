@@ -51,4 +51,9 @@ const Texture *texpool_get(TexPool *pool, const char *path);
 /* Уже загруженная текстура по пути или NULL (без обращения к диску). */
 const Texture *texpool_find(const TexPool *pool, const char *path);
 
+/* Путь, по которому была загружена текстура пула, или NULL, если она
+ * не из этого пула. Нужен редактору: при сохранении карты кубы должны
+ * ссылаться на свои файлы текстур. */
+const char *texpool_path(const TexPool *pool, const Texture *tex);
+
 #endif /* TEXPOOL_H */
