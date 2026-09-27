@@ -102,6 +102,42 @@ Texture prim_load_texture(const char *filename) {
     return tex;
 }
 
+Texture prim_make_checker_texture(void) {
+    enum { SIZE = 64, CELL = 8 };
+    static unsigned char pixels[SIZE * SIZE * 3];
+
+    for (int y = 0; y < SIZE; y++) {
+        for (int x = 0; x < SIZE; x++) {
+            const int even = ((x / CELL) + (y / CELL)) % 2 == 0;
+            unsigned char *p = &pixels[(y * SIZE + x) * 3];
+            /* Два спокойных серо-зелёных тона: видно и грани, и плитку. */
+            p[0] = even ? 140 : 105;
+            p[1] = even ? 150 : 115;
+            p[2] = even ? 140 : 105;
+        }
+    }
+
+    Texture tex = {0, 0, 0};
+    GLuint id = 0;
+    glGenTextures(1, &id);
+    glBindTexture(GL_TEXTURE_2D, id);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, SIZE, SIZE, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, pixels);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+    tex.id = id;
+    tex.width = SIZE;
+    tex.height = SIZE;
+    return tex;
+}
+
 void prim_free_texture(Texture *tex) {
     if (tex->id != 0) {
         glDeleteTextures(1, &tex->id);

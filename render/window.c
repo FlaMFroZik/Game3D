@@ -10,9 +10,16 @@ static int button_state[WIN_BUTTON_COUNT];
 
 /* События «один раз»: ставятся в колбэках GLFW и снимаются чтением,
  * поэтому меню видит ровно одно нажатие, даже если опрос был реже. */
+static int key_pressed_once[WIN_KEY_COUNT];
 static int button_clicked[WIN_BUTTON_COUNT];
 static double scroll_accum = 0.0;
 static int escape_pressed = 0;
+
+/* Захват мыши: дельты движения копятся в колбэке позиции курсора. */
+static int mouse_captured = 0;
+static int mouse_have_last = 0;
+static double mouse_last_x = 0.0, mouse_last_y = 0.0;
+static double mouse_dx = 0.0, mouse_dy = 0.0;
 
 static int glfw_ready = 0;
 
@@ -33,6 +40,9 @@ static int key_slot(int key) {
         case GLFW_KEY_SPACE: return WIN_KEY_SPACE;
         case GLFW_KEY_LEFT_SHIFT:
         case GLFW_KEY_RIGHT_SHIFT: return WIN_KEY_SHIFT;
+        case GLFW_KEY_LEFT_CONTROL:
+        case GLFW_KEY_RIGHT_CONTROL: return WIN_KEY_CTRL;
+        case GLFW_KEY_G:    return WIN_KEY_G;
         case GLFW_KEY_UP:   return WIN_KEY_UP;
         case GLFW_KEY_DOWN: return WIN_KEY_DOWN;
         case GLFW_KEY_LEFT: return WIN_KEY_LEFT;
@@ -44,7 +54,10 @@ static int key_slot(int key) {
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
     (void)window; (void)scancode; (void)mods;
     int slot = key_slot(key);
-    if (slot >= 0) key_state[slot] = (action != GLFW_RELEASE);
+    if (slot >= 0) {
+        key_state[slot] = (action != GLFW_RELEASE);
+        if (action == GLFW_PRESS) key_pressed_once[slot] = 1;
+    }
     /* Esc больше не закрывает игру сразу: его забирает меню (см. main.c). */
     if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
         escape_pressed = 1;
@@ -64,9 +77,61 @@ static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) 
     scroll_accum += yoffset;
 }
 
+/* Движение курсора превращается в дельты только в захвате: обычному
+ * курсору меню важна позиция, а не путь. */
+static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
+    (void)window;
+    if (!mouse_captured) return;
+
+    if (mouse_have_last) {
+        mouse_dx += x - mouse_last_x;
+        mouse_dy += y - mouse_last_y;
+    }
+    mouse_last_x = x;
+    mouse_last_y = y;
+    mouse_have_last = 1;
+}
+
 int win_key_down(WinKey key) {
     if (key < 0 || key >= WIN_KEY_COUNT) return 0;
     return key_state[key];
+}
+
+int win_key_pressed(WinKey key) {
+    if (key < 0 || key >= WIN_KEY_COUNT) return 0;
+    const int pressed = key_pressed_once[key];
+    key_pressed_once[key] = 0;
+    return pressed;
+}
+
+void win_set_mouse_captured(WinWindow *w, int captured) {
+    captured = captured ? 1 : 0;
+    if (mouse_captured == captured) return;
+    mouse_captured = captured;
+
+    glfwSetInputMode(w->window, GLFW_CURSOR,
+                     captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    /* Без ускорения указателя обзор камеры ровнее — если платформа умеет. */
+    if (glfwRawMouseMotionSupported()) {
+        glfwSetInputMode(w->window, GLFW_RAW_MOUSE_MOTION,
+                         captured ? GLFW_TRUE : GLFW_FALSE);
+    }
+
+    /* Первое движение после захвата не считается: прошлой позиции нет. */
+    mouse_have_last = 0;
+    mouse_dx = 0.0;
+    mouse_dy = 0.0;
+}
+
+int win_mouse_captured(void) {
+    return mouse_captured;
+}
+
+void win_mouse_delta(double *dx, double *dy) {
+    if (dx) *dx = mouse_dx;
+    if (dy) *dy = mouse_dy;
+    mouse_dx = 0.0;
+    mouse_dy = 0.0;
 }
 
 int win_button_down(int button) {
@@ -113,8 +178,11 @@ int win_escape_pressed(void) {
 
 void win_reset_input(void) {
     for (int i = 0; i < WIN_BUTTON_COUNT; i++) button_clicked[i] = 0;
+    for (int i = 0; i < WIN_KEY_COUNT; i++) key_pressed_once[i] = 0;
     scroll_accum = 0.0;
     escape_pressed = 0;
+    mouse_dx = 0.0;
+    mouse_dy = 0.0;
 }
 
 /* ---------- Окно ---------- */
@@ -133,6 +201,8 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     memset(w, 0, sizeof(*w));
     memset(key_state, 0, sizeof(key_state));
     memset(button_state, 0, sizeof(button_state));
+    mouse_captured = 0;
+    mouse_have_last = 0;
     win_reset_input();
     glfw_ready = 0;
 
@@ -172,6 +242,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     glfwSetKeyCallback(w->window, key_callback);
     glfwSetMouseButtonCallback(w->window, mouse_button_callback);
     glfwSetScrollCallback(w->window, scroll_callback);
+    glfwSetCursorPosCallback(w->window, cursor_pos_callback);
     return 1;
 }
 

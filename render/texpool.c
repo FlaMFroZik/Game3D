@@ -80,3 +80,13 @@ const Texture *texpool_get(TexPool *pool, const char *path) {
     pool->entries[pool->count++] = entry;
     return &entry->tex;
 }
+
+const char *texpool_path(const TexPool *pool, const Texture *tex) {
+    if (!tex) return NULL;
+    for (size_t i = 0; i < pool->count; i++) {
+        if (&pool->entries[i]->tex == tex) {
+            return pool->entries[i]->path;
+        }
+    }
+    return NULL;
+}

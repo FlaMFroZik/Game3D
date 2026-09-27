@@ -59,6 +59,7 @@ static int map_add_cube(const MapCube *cube) {
     return 1;
 }
 
+
 /* ---------- Пути к текстурам ----------
  * Карта и текстуры часто лежат в одной папке, а игра запускается из другой:
  * поэтому путь из карты ищется сначала рядом с файлом карты, затем
@@ -717,4 +718,112 @@ float map_cylinder_ceiling_height(float cx, float cz, float radius, float curren
 
 float map_ceiling_height(float px, float pz, float current_feet_y) {
     return map_cylinder_ceiling_height(px, pz, 0.0f, current_feet_y);
+}
+
+/* ---------- Редактирование ---------- */
+
+void map_edit_begin(void) {
+    map_init();
+    /* Пустая, но уже «пользовательская» карта: рендер и сохранение
+     * работают с ней так же, как с загруженной из файла. */
+    g_map.is_loaded = 1;
+}
+
+int map_edit_add(const MapCube *cube) {
+    return map_add_cube(cube);
+}
+
+void map_edit_remove(size_t index) {
+    if (index >= g_map.count) return;
+    /* Порядок кубов сохраняем: в файле карты он имеет смысл для автора. */
+    memmove(&g_map.cubes[index], &g_map.cubes[index + 1],
+            (g_map.count - index - 1) * sizeof(MapCube));
+    g_map.count--;
+}
+
+const char *map_texture_path(const Texture *tex) {
+    return texpool_path(&g_map.textures, tex);
+}
+
+/* Путь текстуры в файле карты: если он начинается с каталога карты,
+ * пишем относительный «хвост» — карту с текстурами можно переносить
+ * папкой. Иначе путь остаётся как есть. */
+static const char *save_texture_name(const char *path) {
+    const size_t dir_len = strlen(map_base_dir);
+    if (dir_len > 0 && strncmp(path, map_base_dir, dir_len) == 0
+        && path[dir_len] != '\0') {
+        return path + dir_len;
+    }
+    return path;
+}
+
+/* Печатает число без хвостовых нулей: 4 -> "4", 2.5 -> "2.5". */
+static void save_number(FILE *f, float v) {
+    fprintf(f, "%g", (double)v);
+}
+
+int map_save(const char *filename) {
+    if (!filename || filename[0] == '\0') return 0;
+
+    FILE *f = fopen(filename, "w");
+    if (!f) {
+        fprintf(stderr, "Error: cannot write map file '%s'\n", filename);
+        return 0;
+    }
+
+    /* Дальше карта живёт рядом с этим файлом: относительные пути текстур
+     * должны решаться от него — и при сохранении, и при следующей загрузке. */
+    remember_map_dir(filename);
+
+    fprintf(f, "# Game3D map (.tfm)\n");
+    fprintf(f, "# x y z sx sy sz [tex=<file>] [tile=<meters>] [repeat|stretch]\n\n");
+
+    for (size_t i = 0; i < g_map.count; i++) {
+        const MapCube *c = &g_map.cubes[i];
+
+        save_number(f, c->x);  fputc(' ', f);
+        save_number(f, c->y);  fputc(' ', f);
+        save_number(f, c->z);  fputc(' ', f);
+        save_number(f, c->sx); fputc(' ', f);
+        save_number(f, c->sy); fputc(' ', f);
+        save_number(f, c->sz);
+
+        if (c->texture) {
+            const char *path = texpool_path(&g_map.textures, c->texture);
+            if (path) {
+                const char *name = save_texture_name(path);
+                /* Кавычки — на случай пробелов в пути. */
+                if (strchr(name, ' ') || strchr(name, '\t')) {
+                    fprintf(f, " tex=\"%s\"", name);
+                } else {
+                    fprintf(f, " tex=%s", name);
+                }
+            }
+        }
+        if (c->tile > 0.0f) {
+            fprintf(f, " tile=");
+            save_number(f, c->tile);
+        }
+        if (c->uv == MAP_UV_STRETCH) {
+            fprintf(f, " stretch");
+        }
+        fputc('\n', f);
+    }
+
+    const int ok = (fflush(f) == 0) && !ferror(f);
+    fclose(f);
+
+    if (ok) {
+        printf("Saved map '%s': %d cubes\n", filename, (int)g_map.count);
+    } else {
+        fprintf(stderr, "Error: failed to write map file '%s'\n", filename);
+    }
+    return ok;
+}
+
+const Texture *map_edit_texture(const char *name) {
+    char path[TEXPOOL_PATH_MAX];
+    if (!name || name[0] == '\0') return NULL;
+    if (!resolve_texture_path(name, path, sizeof(path))) return NULL;
+    return texpool_get(&g_map.textures, path);
 }

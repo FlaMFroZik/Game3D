@@ -18,11 +18,9 @@ set_property(CACHE GAME3D_GLFW_WAYLAND PROPERTY STRINGS AUTO ON OFF)
 set(GAME3D_SOURCES
     main.c
     image.c
-    map/gen.c
+    editor/editor.c
     map/list.c
     map/map.c
-    physics/coll.c
-    physics/physics.c
     render/font.c
     render/prim.c
     render/render.c

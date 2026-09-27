@@ -3,11 +3,13 @@
 
 /* ------------------------------------------------------------------
  * Рендер кадра: настройка OpenGL, камера и отрисовка мира.
+ *
+ * Мир редактора — это кубы карты (map/map.c); процедурного рельефа
+ * здесь нет, а вместо игрока с физикой — свободная камера Camera.
  * ------------------------------------------------------------------ */
 
 #include <GL/gl.h>
 
-#include "physics/physics.h"
 #include "render/prim.h"
 #include "render/window.h"
 
@@ -15,36 +17,46 @@
 #define RENDER_NEAR       0.1
 #define RENDER_FAR        300.0
 
-#define RENDER_FOG_START  12.0f  /* до этой дистанции тумана нет */
-#define RENDER_FOG_END    20.0f  /* дальше — полностью туман */
+/* В редакторе туман — только лёгкая глубина кадра: карту нужно видеть
+ * целиком, поэтому он начинается много дальше, чем в игре. */
+#define RENDER_FOG_START  60.0f
+#define RENDER_FOG_END    110.0f
 
-/* Запас к концу тумана: мир готовится чуть дальше, чтобы край рельефа
- * гарантированно не попадал в кадр (см. render_view_radius). */
-#define RENDER_VIEW_MARGIN 0.5f
+/* Наклон камеры чуть меньше вертикали, чтобы взгляд не «переворачивался». */
+#define RENDER_PITCH_LIMIT 1.55f
+
+/* Свободная камера редактора: позиция и направление взгляда. */
+typedef struct {
+    float x, y, z;
+    float yaw;      /* поворот влево/вправо, радианы */
+    float pitch;    /* наклон вверх/вниз, радианы */
+} Camera;
 
 typedef struct {
     float sky[4];      /* цвет неба и тумана (rgba) */
-    Texture texture;   /* текстура рельефа и блоков (см. render/prim.h) */
+    Texture texture;   /* текстура кубов без своей (см. render/prim.h) */
     GLdouble fov;      /* угол обзора по вертикали, градусы */
     GLdouble near_plane;
     GLdouble far_plane;
 } Renderer;
 
-/* Создаёт рендерер и включает состояние OpenGL. 0 — текстуру загрузить не удалось. */
+/* Создаёт рендерер. texture_file может быть NULL или не читаться —
+ * тогда кубам без своей текстуры рисуется встроенная «шахматка».
+ * 0 — только если не удалось создать вообще никакую текстуру. */
 int  render_init(Renderer *r, const char *texture_file);
 
-/* Включает состояние OpenGL, действующее всё время работы игры
+/* Включает состояние OpenGL, действующее всё время работы редактора
  * (глубина, туман). Вызывать после того, как контекст сделан текущим. */
 void render_setup_gl(void);
 
 /* Освобождает ресурсы рендерера. */
 void render_shutdown(Renderer *r);
 
-/* Рисует мир от лица игрока. Кадр должен быть уже очищен и настроен.
- * Рельеф рисуется на радиус render_view_radius вокруг игрока — ровно то,
- * что видно до конца тумана; дальние клетки загруженных чанков
- * пропускаются, чтобы кадр не стоил дороже, чем нужно. */
-void render_world(const Renderer *r, const Player *player);
+/* Единичный вектор взгляда камеры. */
+void render_view_dir(const Camera *cam, float *dx, float *dy, float *dz);
+
+/* Рисует кубы карты. Кадр должен быть уже очищен и настроен. */
+void render_world(const Renderer *r);
 
 /* Очищает экран цветом неба. */
 void render_clear(const Renderer *r);
@@ -52,11 +64,6 @@ void render_clear(const Renderer *r);
 /* Настраивает область отрисовки (glViewport), проекцию и камеру под размер
  * окна. Вызывать каждый кадр после render_clear: при растягивании окна мир
  * должен заполнять его целиком, а не рисоваться в старом прямоугольнике. */
-void render_camera(const Renderer *r, const Player *player, int width, int height);
-
-/* Расстояние, на котором мир обязан быть готов, чтобы кадр не оборвался:
- * конец тумана плюс запас, с учётом высоты камеры. main передаёт это
- * значение в gen_set_view_radius (см. map/gen.h). */
-float render_view_radius(const Player *player);
+void render_camera(const Renderer *r, const Camera *cam, int width, int height);
 
 #endif

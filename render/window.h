@@ -43,6 +43,8 @@ typedef enum {
     WIN_KEY_D,
     WIN_KEY_SPACE,
     WIN_KEY_SHIFT,
+    WIN_KEY_CTRL,
+    WIN_KEY_G,
     WIN_KEY_UP,
     WIN_KEY_DOWN,
     WIN_KEY_LEFT,
@@ -51,7 +53,22 @@ typedef enum {
 } WinKey;
 
 int win_key_down(WinKey key);
-int win_button_down(int button);  /* код мыши GLFW: 0 — левая, 1 — правая (для будущего оружия) */
+
+/* 1 один раз на нажатие клавиши: чтение снимает флаг (для переключателей
+ * вроде «показать/скрыть сетку», где важно само нажатие, а не удержание). */
+int win_key_pressed(WinKey key);
+
+int win_button_down(int button);  /* код мыши GLFW: 0 — левая, 1 — правая */
+
+/* ---------- Захват мыши: обзор камеры в редакторе ----------
+ * В захвате курсор скрыт и не покидает окно, а его движение копится
+ * в дельтах — их забирает win_mouse_delta. */
+
+void win_set_mouse_captured(WinWindow *w, int captured);
+int  win_mouse_captured(void);
+
+/* Накопленное движение мыши с прошлого чтения (пиксели), чтение обнуляет. */
+void win_mouse_delta(double *dx, double *dy);
 
 /* ---------- Мышь и Esc: ввод для меню ----------
  * Все функции отдают событие один раз: чтение снимает флаг. */
