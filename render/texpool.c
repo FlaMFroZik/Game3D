@@ -4,7 +4,6 @@
 #include "render/prim.h"
 #include "render/texpool.h"
 
-/* strdup нет в C11 (а в MSVC он называется _strdup), поэтому своя копия. */
 static char *dup_string(const char *s) {
     size_t len = strlen(s) + 1;
     char *copy = malloc(len);
@@ -24,7 +23,10 @@ void texpool_free(TexPool *pool) {
     for (size_t i = 0; i < pool->count; i++) {
         TexPoolEntry *entry = pool->entries[i];
         if (!entry) continue;
-        prim_free_texture(&entry->tex);
+        /* Освобождаем только если это не встроенная текстура */
+        if (!prim_find_builtin(entry->path)) {
+            prim_free_texture(&entry->tex);
+        }
         free(entry->path);
         free(entry);
     }
@@ -48,7 +50,8 @@ static TexPoolEntry *find_entry(const TexPool *pool, const char *path) {
 
 const Texture *texpool_find(const TexPool *pool, const char *path) {
     TexPoolEntry *entry = find_entry(pool, path);
-    return entry ? &entry->tex : NULL;
+    if (entry) return &entry->tex;
+    return prim_find_builtin(path);
 }
 
 const Texture *texpool_get(TexPool *pool, const char *path) {
@@ -56,6 +59,9 @@ const Texture *texpool_get(TexPool *pool, const char *path) {
 
     TexPoolEntry *known = find_entry(pool, path);
     if (known) return &known->tex;
+
+    /* Проверяем встроенные текстуры */
+    const Texture *builtin = prim_find_builtin(path);
 
     if (pool->count == pool->capacity) {
         size_t new_capacity = (pool->capacity == 0) ? 8 : pool->capacity * 2;
@@ -69,7 +75,11 @@ const Texture *texpool_get(TexPool *pool, const char *path) {
     if (!entry) return NULL;
 
     entry->path = dup_string(path);
-    entry->tex = prim_load_texture(path);
+    if (builtin) {
+        entry->tex = *builtin;
+    } else {
+        entry->tex = prim_load_texture(path);
+    }
 
     if (!entry->path || entry->tex.id == 0) {
         free(entry->path);
@@ -83,9 +93,17 @@ const Texture *texpool_get(TexPool *pool, const char *path) {
 
 const char *texpool_path(const TexPool *pool, const Texture *tex) {
     if (!tex) return NULL;
-    for (size_t i = 0; i < pool->count; i++) {
-        if (&pool->entries[i]->tex == tex) {
-            return pool->entries[i]->path;
+    if (pool) {
+        for (size_t i = 0; i < pool->count; i++) {
+            if (pool->entries[i] && pool->entries[i]->tex.id == tex->id) {
+                return pool->entries[i]->path;
+            }
+        }
+    }
+    for (int i = 0; i < prim_builtin_count(); i++) {
+        const Texture *bt = prim_builtin_texture(i);
+        if (bt && bt->id == tex->id) {
+            return prim_builtin_name(i);
         }
     }
     return NULL;
