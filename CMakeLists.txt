@@ -1,6 +1,29 @@
 cmake_minimum_required(VERSION 3.20)
 
+# CMake 3.31+ нормализует пути в install(DESTINATION ...). Включаем новое
+# поведение явно: иначе на свежих CMake установка ругается на политику CMP0177,
+# а на старых эта строка просто ничего не делает.
+if(POLICY CMP0177)
+    cmake_policy(SET CMP0177 NEW)
+endif()
+
 project(Game3D VERSION 1.3 LANGUAGES C)
+
+# Тип сборки. У Makefile и Ninja он один на весь каталог и выбирается здесь, на
+# конфигурации: `cmake --build build --config Release` для них ничего не значит,
+# и без CMAKE_BUILD_TYPE компилятор работает вообще без оптимизаций. Visual
+# Studio и другие многоконфигурационные генераторы выбирают конфигурацию сами,
+# их не трогаем.
+get_property(GAME3D_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT GAME3D_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Build type: Debug, Release, RelWithDebInfo or MinSizeRel" FORCE)
+    message(STATUS "CMAKE_BUILD_TYPE не задан — собираем Release")
+endif()
+if(NOT GAME3D_MULTI_CONFIG)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+                 Debug Release RelWithDebInfo MinSizeRel)
+endif()
 
 option(GAME3D_FETCH_GLFW
        "Download GLFW when a system package is not available"
@@ -29,10 +52,28 @@ set(GAME3D_SOURCES
     render/window.c
 )
 
+# Заголовки на сборку не влияют, но, будучи перечисленными в цели, попадают в
+# дерево файлов IDE (Visual Studio, CLion, Qt Creator) — иначе там виден только
+# список .c.
+set(GAME3D_HEADERS
+    image.h
+    editor/editor.h
+    map/list.h
+    map/map.h
+    physics/coll.h
+    render/font.h
+    render/prim.h
+    render/render.h
+    render/texpool.h
+    render/ui.h
+    render/window.h
+)
+
 # Шрифт меню: лежит в репозитории и копируется к собранной игре, чтобы
 # exe/ELF находил его рядом с собой (см. find_font в main.c).
 set(GAME3D_FONT_FILE DejaVuSans.ttf)
-set(GAME3D_FONT_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/${GAME3D_FONT_FILE})
+set(GAME3D_FONT_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/${GAME3D_FONT_FILE}")
 
 # ---------------------------------------------------------------------------
 # Подсказки про пакеты разработки.
@@ -221,9 +262,12 @@ elseif(GAME3D_FETCH_GLFW)
     include(FetchContent)
 
     # Game3D needs only the library, not GLFW's examples, tests or docs.
+    # GLFW_INSTALL тоже выключен: скачанная копия GLFW принадлежит этой сборке,
+    # и `cmake --install` не должен раскладывать её заголовки по системе.
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 
     # GLFW 3.4 собирается с двумя бэкендами сразу — X11 и Wayland, — и каждый
     # требует своих заголовков, поэтому по умолчанию сборка падает на том,
@@ -387,11 +431,16 @@ if(GAME3D_FETCH_STB)
     )
     # В каталоге stb нет CMakeLists.txt: MakeAvailable просто скачает его.
     FetchContent_MakeAvailable(stb)
-    set(GAME3D_STB_INCLUDE_DIR ${stb_SOURCE_DIR})
+    set(GAME3D_STB_INCLUDE_DIR "${stb_SOURCE_DIR}")
+    if(NOT EXISTS "${GAME3D_STB_INCLUDE_DIR}/stb_truetype.h")
+        message(FATAL_ERROR
+            "stb скачан в ${GAME3D_STB_INCLUDE_DIR}, но stb_truetype.h там нет. "
+            "Удалите каталог сборки и сконфигурируйте заново.")
+    endif()
 else()
     set(GAME3D_STB_INCLUDE_DIR "" CACHE PATH
         "Directory with stb_truetype.h when GAME3D_FETCH_STB is OFF")
-    if(NOT EXISTS ${GAME3D_STB_INCLUDE_DIR}/stb_truetype.h)
+    if(NOT EXISTS "${GAME3D_STB_INCLUDE_DIR}/stb_truetype.h")
         message(FATAL_ERROR
             "GAME3D_FETCH_STB is OFF, but stb_truetype.h is not in "
             "${GAME3D_STB_INCLUDE_DIR}. Set -DGAME3D_STB_INCLUDE_DIR=<каталог> "
@@ -417,13 +466,17 @@ else()
     message(FATAL_ERROR "CMake found OpenGL, but no linkable OpenGL target is available.")
 endif()
 
-add_executable(game3d ${GAME3D_SOURCES})
+add_executable(game3d ${GAME3D_SOURCES} ${GAME3D_HEADERS})
+
+# Раскладка файлов в IDE повторяет каталоги репозитория (render, map, editor).
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}"
+             FILES ${GAME3D_SOURCES} ${GAME3D_HEADERS})
 
 target_compile_features(game3d PRIVATE c_std_11)
-target_include_directories(game3d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(game3d PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 # SYSTEM: stb_truetype.h — сторонний заголовок, его предупреждения не должны
 # мешать сборке с -Wall -Wextra -Wpedantic.
-target_include_directories(game3d SYSTEM PRIVATE ${GAME3D_STB_INCLUDE_DIR})
+target_include_directories(game3d SYSTEM PRIVATE "${GAME3D_STB_INCLUDE_DIR}")
 target_link_libraries(game3d PRIVATE
     ${GAME3D_GLFW_TARGET}
     ${GAME3D_OPENGL_TARGET}
@@ -432,6 +485,36 @@ target_link_libraries(game3d PRIVATE
 # libm is needed on Unix; MSVC and Windows OpenGL do not need it.
 if(UNIX AND NOT APPLE)
     target_link_libraries(game3d PRIVATE m)
+endif()
+
+# ---------------------------------------------------------------------------
+# Windows: два условия, без которых сборка не проходит или портится текст.
+#
+# 1. <GL/gl.h> из Windows SDK (и из MinGW) написан в расчёте на windows.h:
+#    сам он WINGDIAPI и APIENTRY не объявляет, поэтому без windows.h впереди
+#    разбирается с ошибками. Модули рендера подключают <GL/gl.h> напрямую, так
+#    что windows.h подставляется компилятором в начало каждого файла — это
+#    держит исходники переносимыми. WIN32_LEAN_AND_MEAN убирает из windows.h
+#    сокеты, DDE, RPC и оболочку (GDI, откуда WINGDIAPI, остаётся на месте).
+# 2. Исходники в UTF-8, в меню русский текст, а font.c ждёт на входе именно
+#    UTF-8. MSVC без /utf-8 читает файлы в кодовой странице системы, и вместо
+#    подписей кнопок получается мусор.
+# ---------------------------------------------------------------------------
+if(WIN32)
+    target_compile_definitions(game3d PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        # /FI — принудительное подключение заголовка, /utf-8 — кодировка
+        # исходников и строковых литералов. Подходит и для clang-cl.
+        target_compile_options(game3d PRIVATE /FIwindows.h /utf-8)
+    else()
+        # MinGW: у GCC и Clang то же самое пишется иначе. Кодировку задаём
+        # только GCC — Clang и так считает исходники и литералы UTF-8.
+        target_compile_options(game3d PRIVATE "SHELL:-include windows.h")
+        if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+            target_compile_options(game3d PRIVATE
+                -finput-charset=UTF-8 -fexec-charset=UTF-8)
+        endif()
+    endif()
 endif()
 
 if(MSVC)
@@ -458,7 +541,7 @@ set_target_properties(game3d PROPERTIES
 
 # Шрифт меню должен лежать рядом с игрой: main.c ищет его в каталоге
 # исполняемого файла (и в текущем каталоге, если запущено из сборки).
-if(NOT EXISTS ${GAME3D_FONT_SOURCE})
+if(NOT EXISTS "${GAME3D_FONT_SOURCE}")
     message(FATAL_ERROR "Interface font not found: ${GAME3D_FONT_SOURCE}")
 endif()
 
@@ -470,3 +553,8 @@ add_custom_command(TARGET game3d POST_BUILD
             "$<TARGET_FILE_DIR:game3d>/assets/fonts/${GAME3D_FONT_FILE}"
     COMMENT "Copying ${GAME3D_FONT_FILE} next to game3d"
     VERBATIM)
+
+# Необязательная установка: `cmake --install build --prefix <каталог>` кладёт
+# редактор и шрифт тем же деревом, что и сборка, — каталог можно унести целиком.
+install(TARGETS game3d RUNTIME DESTINATION ".")
+install(FILES "${GAME3D_FONT_SOURCE}" DESTINATION "assets/fonts")

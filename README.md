@@ -24,6 +24,14 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
+Ключ `--config` понимают только многоконфигурационные генераторы (Visual
+Studio, Ninja Multi-Config); у Makefile и обычного Ninja тип сборки выбирается
+на конфигурации, поэтому CMake сам ставит `Release`, если не задать другой:
+`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug`.
+
+Собранное можно унести целиком: `cmake --install build --prefix dist` кладёт в
+`dist` редактор и шрифт рядом с ним.
+
 Пакеты разработки, если их ещё нет:
 
 ```sh
