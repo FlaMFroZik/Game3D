@@ -101,6 +101,10 @@ static void remember_map_dir(const char *filename) {
 
 static int resolve_texture_path(const char *name, char *out, size_t out_size) {
     if (name[0] == '\0') return 0;
+    if (prim_find_builtin(name)) {
+        snprintf(out, out_size, "%s", name);
+        return 1;
+    }
     if (path_is_absolute(name)) return join_path(out, out_size, "", name);
 
     if (map_base_dir[0] != '\0' && join_path(out, out_size, map_base_dir, name)

@@ -8,11 +8,6 @@
 
 #define RENDER_PI 3.14159265358979323846
 
-/* ------------------------------------------------------------------
- * Матрицы задаются фиксированным конвейером (glMatrixMode/glFrustum),
- * шейдеров нет — менять эту часть можно без правок остальных модулей.
- * ------------------------------------------------------------------ */
-
 static void render_perspective(GLdouble fov, GLdouble aspect,
                                GLdouble near_plane, GLdouble far_plane) {
     const GLdouble half_angle = fov * RENDER_PI / 360.0;
@@ -22,8 +17,6 @@ static void render_perspective(GLdouble fov, GLdouble aspect,
     glFrustum(-right, right, -top, top, near_plane, far_plane);
 }
 
-/* Замена gluLookAt без зависимости от GLU. Направление взгляда уже
- * единичное (его создаёт render_view_dir), нужен только базис камеры. */
 static void render_look_at(float eye_x, float eye_y, float eye_z,
                            float forward_x, float forward_y, float forward_z) {
     const float up_x = 0.0f;
@@ -74,9 +67,10 @@ void render_view_dir(const Camera *cam, float *dx, float *dy, float *dz) {
 }
 
 int render_init(Renderer *r, const char *texture_file) {
-    r->sky[0] = 0.45f;
-    r->sky[1] = 0.65f;
-    r->sky[2] = 0.85f;
+    /* Hammer 3D Viewport темно-серый/синеватый фон неба */
+    r->sky[0] = 0.14f;
+    r->sky[1] = 0.16f;
+    r->sky[2] = 0.19f;
     r->sky[3] = 1.0f;
 
     r->fov = RENDER_FOV;
@@ -88,10 +82,13 @@ int render_init(Renderer *r, const char *texture_file) {
         r->texture = prim_load_texture(texture_file);
     }
 
-    /* Редактор должен работать и без текстуры в командной строке:
-     * кубы без своей текстуры рисуются встроенной «шахматкой». */
     if (r->texture.id == 0) {
-        r->texture = prim_make_checker_texture();
+        const Texture *bt = prim_find_builtin("dev/dev_measureorange");
+        if (bt) {
+            r->texture = *bt;
+        } else {
+            r->texture = prim_make_checker_texture();
+        }
     }
     return r->texture.id != 0;
 }
@@ -106,24 +103,22 @@ void render_setup_gl(void) {
 }
 
 void render_shutdown(Renderer *r) {
-    prim_free_texture(&r->texture);
+    if (!prim_find_builtin(map_texture_path(&r->texture))) {
+        prim_free_texture(&r->texture);
+    }
 }
 
 void render_clear(const Renderer *r) {
-    glClearColor(r->sky[0], r->sky[1], r->sky[2], r->sky[3]);  /* небо */
-    /* Цвет тумана = цвет неба => горизонт бесшовный. */
+    glClearColor(r->sky[0], r->sky[1], r->sky[2], r->sky[3]);
     glFogfv(GL_FOG_COLOR, r->sky);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
 void render_camera(const Renderer *r, const Camera *cam, int width, int height) {
-    /* Область отрисовки — окно целиком. Без этого OpenGL рисует в размер,
-     * который был при создании контекста. */
     if (width <= 0 || height <= 0) {
         width = 1;
         height = 1;
     }
-    glViewport(0, 0, width, height);
 
     const float aspect = (float)width / (float)height;
 
@@ -141,11 +136,6 @@ void render_camera(const Renderer *r, const Camera *cam, int width, int height) 
 
 void render_world(const Renderer *r) {
     glEnable(GL_TEXTURE_2D);
-
-    /* У кубов карты могут быть свои текстуры, поэтому map_render сам
-     * привязывает нужную текстуру каждому кубу; r->texture — та, которой
-     * нарисуются кубы без своей. */
     map_render(&r->texture);
-
     glDisable(GL_TEXTURE_2D);
 }
