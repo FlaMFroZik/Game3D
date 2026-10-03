@@ -4,6 +4,7 @@
 #include "map/gen.h"
 #include "map/list.h"
 #include "map/map.h"
+#include "network/multiplayer.h"
 #include "physics/physics.h"
 #include "render/font.h"
 #include "render/render.h"
@@ -31,11 +32,15 @@
 #define FONT_DIR  "assets/fonts"
 #define FONT_FILE "DejaVuSans.ttf"
 
+/* Список удалённых серверов читается рядом с игрой из этого файла. */
+#define SERVER_LIST_FILE "servers.txt"
+
 /* ---------- Экраны ---------- */
 
 typedef enum {
-    SCREEN_MAIN_MENU = 0,   /* «Начать» и «Выйти» */
+    SCREEN_MAIN_MENU = 0,   /* выбор одиночной или многопользовательской игры */
     SCREEN_MAP_LIST,        /* список карт рядом с игрой */
+    SCREEN_MULTIPLAYER,     /* подключение UDP-клиента к внешнему серверу */
     SCREEN_PLAYING,
     SCREEN_PAUSE,           /* Esc в игре: «Закрыть меню» и «Выйти» */
     SCREEN_QUIT             /* не рисуется: сигнал выйти из цикла */
@@ -45,11 +50,12 @@ typedef enum {
  * Заданы для окна высотой 600 px и умножаются на масштаб интерфейса,
  * поэтому на большом окне меню просто крупнее. */
 
-#define MENU_PANEL_W        340.0f
+#define MENU_PANEL_W        540.0f
 #define MENU_PANEL_PAD       24.0f
 #define MENU_BUTTON_H        44.0f
 #define MENU_BUTTON_GAP      12.0f
-#define MENU_MAIN_PANEL_H   250.0f
+#define MENU_MAIN_PANEL_H   300.0f
+#define MENU_MULTI_PANEL_H  520.0f
 #define MENU_PAUSE_PANEL_H  230.0f
 #define MENU_TITLE_SCALE      1.6f
 #define MENU_HEAD_SCALE       1.3f
@@ -198,11 +204,17 @@ static Screen draw_main_menu(Ui *ui) {
 
     const float button_w = panel.w - 2.0f * MENU_PANEL_PAD * s;
     const float button_x = panel.x + MENU_PANEL_PAD * s;
-    float y = panel.y + 100.0f * s;
+    float y = panel.y + 86.0f * s;
 
     if (ui_button(ui, ui_rect(button_x, y, button_w, MENU_BUTTON_H * s),
-                  "НАЧАТЬ", UI_BUTTON_DEFAULT)) {
+                  "Однопользовательская игра", UI_BUTTON_DEFAULT)) {
         return SCREEN_MAP_LIST;
+    }
+
+    y += (MENU_BUTTON_H + MENU_BUTTON_GAP) * s;
+    if (ui_button(ui, ui_rect(button_x, y, button_w, MENU_BUTTON_H * s),
+                  "Многопользовательская игра", UI_BUTTON_DEFAULT)) {
+        return SCREEN_MULTIPLAYER;
     }
 
     y += (MENU_BUTTON_H + MENU_BUTTON_GAP) * s;
@@ -219,6 +231,12 @@ typedef struct {
     MapList maps;
     int scroll;      /* индекс первой видимой строки */
 } MapMenu;
+
+/* Прокрутка списка серверов LAN. Адреса появляются только после строгой
+ * проверки ответа [1] в network/multiplayer.c. */
+typedef struct {
+    int scroll;
+} ServerMenu;
 
 /* Возвращает SCREEN_PLAYING и пишет путь к карте в out (пустая строка —
  * игра без карты, процедурный мир); иначе — следующий экран меню. */
@@ -289,6 +307,104 @@ static Screen draw_map_list(Ui *ui, MapMenu *menu, char *out, size_t out_size) {
     return SCREEN_MAP_LIST;
 }
 
+/* Сервер не запускается и не поставляется с клиентом. Браузер сначала
+ * опрашивает LAN broadcast, потом читает servers.txt рядом с игрой. */
+static Screen draw_multiplayer_menu(Ui *ui, MultiplayerClient *client,
+                                    MultiplayerServerBrowser *browser,
+                                    ServerMenu *menu, const char *server_file,
+                                    double now) {
+    const float s = ui->scale;
+    const float pad = MENU_PANEL_PAD * s;
+    const UiRect panel = ui_centered(ui, MENU_PANEL_W * s, MENU_MULTI_PANEL_H * s);
+    int server_count = 0;
+    const MultiplayerServerEntry *servers =
+        multiplayer_server_browser_entries(browser, &server_count);
+    const int rows_visible = 6;
+    const float row_h = 34.0f * s;
+    const float list_top = panel.y + 148.0f * s;
+    char text[160];
+
+    ui_fill(panel, UI_COLOR_PANEL);
+    ui_border(panel, MENU_EDGE(s), UI_COLOR_PANEL_EDGE);
+
+    ui_label_in(ui,
+                ui_rect(panel.x, panel.y + pad, panel.w, 34.0f * s),
+                MENU_HEAD_SCALE, UI_COLOR_TEXT, "МНОГОПОЛЬЗОВАТЕЛЬСКАЯ ИГРА");
+
+    ui_label(ui, panel.x + pad, panel.y + 78.0f * s, 0.8f,
+             UI_COLOR_TEXT_DIM, "ПОИСК UDP-СЕРВЕРОВ В ЛОКАЛЬНОЙ СЕТИ");
+    ui_label(ui, panel.x + pad, panel.y + 100.0f * s, 0.88f,
+             UI_COLOR_TEXT,
+             (client->state == MULTIPLAYER_IDLE)
+                 ? multiplayer_server_browser_status(browser)
+                 : multiplayer_status(client));
+
+    snprintf(text, sizeof text, "ДОСТУПНЫЕ СЕРВЕРЫ: %d", server_count);
+    ui_label(ui, panel.x + pad, panel.y + 124.0f * s, 0.82f,
+             UI_COLOR_TEXT_DIM, text);
+
+    if (menu->scroll < 0) menu->scroll = 0;
+    if (menu->scroll > server_count - rows_visible) {
+        menu->scroll = server_count - rows_visible;
+    }
+    if (menu->scroll < 0) menu->scroll = 0;
+    menu->scroll -= (int)ui->wheel;
+    if (menu->scroll < 0) menu->scroll = 0;
+    if (menu->scroll > server_count - rows_visible) {
+        menu->scroll = server_count - rows_visible;
+    }
+
+    if (server_count == 0) {
+        ui_label(ui, panel.x + pad, list_top + 10.0f * s, 0.88f,
+                 UI_COLOR_TEXT_DIM, "НЕТ КОРРЕКТНЫХ ОТВЕТОВ [1]");
+    } else {
+        const int visible = (server_count - menu->scroll < rows_visible)
+            ? server_count - menu->scroll : rows_visible;
+        for (int i = 0; i < visible; i++) {
+            const MultiplayerServerEntry *entry = &servers[menu->scroll + i];
+            const UiRect row = ui_rect(panel.x + pad,
+                                       list_top + (float)i * row_h,
+                                       panel.w - 2.0f * pad, row_h - 4.0f * s);
+
+            /* Не даём неподконтрольному имени сервера выйти за края кнопки. */
+            snprintf(text, sizeof text, "%.18s  %.9s  %u/%u  %.10s",
+                     entry->endpoint, entry->info.name,
+                     (unsigned int)entry->info.players,
+                     (unsigned int)entry->info.max_players, entry->info.map);
+            if (ui_button(ui, row, text, UI_BUTTON_DEFAULT)) {
+                multiplayer_server_browser_stop(browser);
+                (void)multiplayer_connect(client, entry->endpoint, now);
+            }
+        }
+        if (server_count > rows_visible) {
+            ui_label(ui, panel.x + pad, list_top + rows_visible * row_h + 2.0f * s,
+                     0.72f, UI_COLOR_TEXT_DIM, MAP_LIST_SCROLL_HINT);
+        }
+    }
+
+    ui_label(ui, panel.x + pad, panel.y + 382.0f * s, 0.76f,
+             UI_COLOR_TEXT_DIM, "ПОСЛЕ LAN ПРОВЕРЯЕТСЯ ФАЙЛ SERVERS.TXT");
+    const float button_w = panel.w - 2.0f * pad;
+    const float button_x = panel.x + pad;
+
+    const float footer_y = panel.y + panel.h - pad - MENU_BUTTON_H * s;
+    const float footer_gap = 10.0f * s;
+    const float footer_w = (button_w - footer_gap) * 0.5f;
+    if (ui_button(ui, ui_rect(button_x, footer_y, footer_w, MENU_BUTTON_H * s),
+                  "ОБНОВИТЬ", UI_BUTTON_DEFAULT)) {
+        multiplayer_disconnect(client);
+        menu->scroll = 0;
+        (void)multiplayer_server_browser_start(browser, server_file, now);
+    }
+    if (ui_button(ui, ui_rect(button_x + footer_w + footer_gap, footer_y,
+                              footer_w, MENU_BUTTON_H * s),
+                  "НАЗАД", UI_BUTTON_DANGER)) {
+        return SCREEN_MAIN_MENU;
+    }
+
+    return SCREEN_MULTIPLAYER;
+}
+
 /* Пауза: «Закрыть меню» сверху, «Выйти» внизу. */
 static Screen draw_pause(Ui *ui) {
     const float s = ui->scale;
@@ -347,23 +463,24 @@ static const char *find_font(char *out, size_t out_size) {
 
 /* ---------- Игра ---------- */
 
-int main(int argc, char **argv) {
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "Usage: %s <texture-file> [map-file]\n", argv[0]);
-        return 1;
-    }
+/* Пользователь не передаёт адреса и ресурсы в командной строке: текстура
+ * встроена, а servers.txt всегда лежит рядом с исполняемым файлом. */
+static void server_list_path(char *out, size_t out_size) {
+    snprintf(out, out_size, "%s/%s", map_list_game_dir(), SERVER_LIST_FILE);
+    if (file_exists(out)) return;
+    /* Удобно и для запуска из дерева исходников без сборки. */
+    snprintf(out, out_size, "%s", SERVER_LIST_FILE);
+}
 
-    const char *texture_file = argv[1];
-    const char *map_file = (argc >= 3 && argv[2][0] != '\0') ? argv[2] : NULL;
-
+int main(void) {
     WinWindow window;
     if (!win_init(&window, WINDOW_WIDTH, WINDOW_HEIGHT, "Game3D")) {
         return 1;
     }
 
     Renderer renderer;
-    if (!render_init(&renderer, texture_file)) {
-        fprintf(stderr, "Failed to load texture: %s\n", texture_file);
+    if (!render_init(&renderer, NULL)) {
+        fprintf(stderr, "Failed to create the built-in texture.\n");
         render_shutdown(&renderer);
         win_shutdown(&window);
         return 1;
@@ -386,9 +503,20 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    char server_file[MULTIPLAYER_SERVER_FILE_MAX + 1];
+    server_list_path(server_file, sizeof server_file);
+
     Screen screen = SCREEN_MAIN_MENU;
     MapMenu map_menu;
     memset(&map_menu, 0, sizeof map_menu);
+
+    MultiplayerClient multiplayer;
+    multiplayer_init(&multiplayer);
+    MultiplayerServerBrowser server_browser;
+    multiplayer_server_browser_init(&server_browser);
+    ServerMenu server_menu;
+    memset(&server_menu, 0, sizeof server_menu);
+    int multiplayer_game = 0;
 
     Player player;
     phys_init(&player);
@@ -397,12 +525,6 @@ int main(int argc, char **argv) {
     double accumulator = 0.0;
     FpsCounter fps;
     fps_init(&fps, last_time);
-
-    /* Карта в командной строке запускает игру сразу, минуя меню. */
-    if (map_file) {
-        load_world(map_file);
-        screen = SCREEN_PLAYING;
-    }
 
     while (screen != SCREEN_QUIT && !win_poll(&window)) {
         const double frame_time = win_time_seconds();
@@ -422,9 +544,28 @@ int main(int argc, char **argv) {
                 read_input(&in);
                 phys_update(&player, &in, PHYSICS_STEP);
                 accumulator -= PHYSICS_STEP;
+
+                if (multiplayer_game) {
+                    float look_x, look_y, look_z;
+                    phys_view_dir(&player, &look_x, &look_y, &look_z);
+                    multiplayer_send_transform(&multiplayer,
+                                               player.x, player.y, player.z,
+                                               look_x, look_y, look_z);
+                }
+            }
+
+            if (multiplayer_game) {
+                multiplayer_update(&multiplayer, frame_time);
+                multiplayer_request_visible_players(&multiplayer, frame_time);
             }
 
             draw_world(&renderer, &window, &player);
+            if (multiplayer_game) {
+                int remote_count = 0;
+                const MultiplayerRemotePlayer *remote =
+                    multiplayer_remote_players(&multiplayer, &remote_count);
+                render_remote_players(remote, remote_count);
+            }
 
             /* Esc больше не закрывает игру, а открывает паузу. */
             if (win_escape_pressed()) {
@@ -465,10 +606,27 @@ int main(int argc, char **argv) {
                      * пока меню было открыто. */
                     map_list_scan(&map_menu.maps, map_list_game_dir());
                     map_menu.scroll = 0;
+                } else if (next == SCREEN_MULTIPLAYER) {
+                    server_menu.scroll = 0;
+                    (void)multiplayer_server_browser_start(&server_browser, server_file, frame_time);
                 }
                 break;
             case SCREEN_MAP_LIST:
                 next = draw_map_list(&ui, &map_menu, chosen_map, sizeof chosen_map);
+                break;
+            case SCREEN_MULTIPLAYER:
+                multiplayer_server_browser_update(&server_browser, frame_time);
+                multiplayer_update(&multiplayer, frame_time);
+                next = draw_multiplayer_menu(&ui, &multiplayer, &server_browser,
+                                             &server_menu, server_file, frame_time);
+                if (multiplayer_is_joined(&multiplayer)) {
+                    const MultiplayerServerInfo *info = multiplayer_server_info(&multiplayer);
+                    if (info->map[0] != '\0') {
+                        snprintf(chosen_map, sizeof chosen_map, "%s", info->map);
+                    }
+                    multiplayer_server_browser_stop(&server_browser);
+                    next = SCREEN_PLAYING;
+                }
                 break;
             case SCREEN_PAUSE:
                 next = draw_pause(&ui);
@@ -482,11 +640,26 @@ int main(int argc, char **argv) {
         win_swap(&window);
 
         if (screen == SCREEN_MAP_LIST && next == SCREEN_PLAYING) {
-            /* Новая партия: мир из выбранного файла или процедурный. */
+            /* Новая одиночная партия: карта или процедурный мир. */
+            multiplayer_game = 0;
             load_world(chosen_map);
             phys_init(&player);
             accumulator = 0.0;
             last_time = win_time_seconds();
+            win_reset_input();
+        } else if (screen == SCREEN_MULTIPLAYER && next == SCREEN_PLAYING) {
+            /* Карта в [1] — имя уже установленного у клиента файла. Если её
+             * нет, load_world оставляет процедурный мир; по UDP карта не
+             * скачивается. */
+            multiplayer_game = 1;
+            load_world(chosen_map);
+            phys_init(&player);
+            accumulator = 0.0;
+            last_time = win_time_seconds();
+            win_reset_input();
+        } else if (screen == SCREEN_MULTIPLAYER && next == SCREEN_MAIN_MENU) {
+            multiplayer_server_browser_stop(&server_browser);
+            multiplayer_disconnect(&multiplayer);
             win_reset_input();
         } else if (screen == SCREEN_PAUSE && next == SCREEN_PLAYING) {
             /* Продолжаем ту же партию: мир и игрок остаются на месте. */
@@ -495,6 +668,8 @@ int main(int argc, char **argv) {
             win_reset_input();
         } else if (screen == SCREEN_PAUSE && next == SCREEN_MAIN_MENU) {
             /* Выход из партии: мир освобождаем, пока контекст жив. */
+            if (multiplayer_game) multiplayer_disconnect(&multiplayer);
+            multiplayer_game = 0;
             map_free();
             win_reset_input();
         } else if (next != screen) {
@@ -504,10 +679,22 @@ int main(int argc, char **argv) {
         /* Esc в меню работает как кнопка назад, а в главном меню — как выход. */
         if (win_escape_pressed()) {
             switch (next) {
-                case SCREEN_MAP_LIST: next = SCREEN_MAIN_MENU; break;
-                case SCREEN_PAUSE:    next = SCREEN_PLAYING;   break;
-                case SCREEN_MAIN_MENU: next = SCREEN_QUIT;     break;
-                default: break;
+                case SCREEN_MAP_LIST:
+                    next = SCREEN_MAIN_MENU;
+                    break;
+                case SCREEN_MULTIPLAYER:
+                    multiplayer_server_browser_stop(&server_browser);
+                    multiplayer_disconnect(&multiplayer);
+                    next = SCREEN_MAIN_MENU;
+                    break;
+                case SCREEN_PAUSE:
+                    next = SCREEN_PLAYING;
+                    break;
+                case SCREEN_MAIN_MENU:
+                    next = SCREEN_QUIT;
+                    break;
+                default:
+                    break;
             }
             win_reset_input();
         }
@@ -515,6 +702,8 @@ int main(int argc, char **argv) {
         screen = next;
     }
 
+    multiplayer_server_browser_stop(&server_browser);
+    multiplayer_disconnect(&multiplayer);
     map_free();
     font_destroy(font);
     render_shutdown(&renderer);

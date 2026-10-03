@@ -7,6 +7,7 @@
 
 #include <GL/gl.h>
 
+#include "network/multiplayer.h"
 #include "physics/physics.h"
 #include "render/prim.h"
 #include "render/window.h"
@@ -45,6 +46,10 @@ void render_shutdown(Renderer *r);
  * что видно до конца тумана; дальние клетки загруженных чанков
  * пропускаются, чтобы кадр не стоил дороже, чем нужно. */
 void render_world(const Renderer *r, const Player *player);
+
+/* Простые модели игроков, полученные в ответе UDP [4]. Мировая камера уже
+ * должна быть настроена render_camera. */
+void render_remote_players(const MultiplayerRemotePlayer *players, int count);
 
 /* Очищает экран цветом неба. */
 void render_clear(const Renderer *r);

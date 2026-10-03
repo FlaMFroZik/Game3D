@@ -21,6 +21,7 @@ set(GAME3D_SOURCES
     map/gen.c
     map/list.c
     map/map.c
+    network/multiplayer.c
     physics/coll.c
     physics/physics.c
     render/font.c
@@ -35,6 +36,10 @@ set(GAME3D_SOURCES
 # exe/ELF находил его рядом с собой (см. find_font в main.c).
 set(GAME3D_FONT_FILE DejaVuSans.ttf)
 set(GAME3D_FONT_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/${GAME3D_FONT_FILE})
+# Список серверов копируется рядом с игрой: он редактируется без аргументов
+# командной строки и читается после поиска LAN.
+set(GAME3D_SERVERS_FILE servers.txt)
+set(GAME3D_SERVERS_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/${GAME3D_SERVERS_FILE})
 
 # ---------------------------------------------------------------------------
 # Подсказки про пакеты разработки.
@@ -434,6 +439,9 @@ target_link_libraries(game3d PRIVATE
 # libm is needed on Unix; MSVC and Windows OpenGL do not need it.
 if(UNIX AND NOT APPLE)
     target_link_libraries(game3d PRIVATE m)
+elseif(WIN32)
+    # UDP-клиент использует Winsock; сервер в проект не собирается.
+    target_link_libraries(game3d PRIVATE ws2_32)
 endif()
 
 if(MSVC)
@@ -463,6 +471,9 @@ set_target_properties(game3d PROPERTIES
 if(NOT EXISTS ${GAME3D_FONT_SOURCE})
     message(FATAL_ERROR "Interface font not found: ${GAME3D_FONT_SOURCE}")
 endif()
+if(NOT EXISTS ${GAME3D_SERVERS_SOURCE})
+    message(FATAL_ERROR "Server list template not found: ${GAME3D_SERVERS_SOURCE}")
+endif()
 
 add_custom_command(TARGET game3d POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -470,5 +481,8 @@ add_custom_command(TARGET game3d POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${GAME3D_FONT_SOURCE}"
             "$<TARGET_FILE_DIR:game3d>/assets/fonts/${GAME3D_FONT_FILE}"
-    COMMENT "Copying ${GAME3D_FONT_FILE} next to game3d"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${GAME3D_SERVERS_SOURCE}"
+            "$<TARGET_FILE_DIR:game3d>/${GAME3D_SERVERS_FILE}"
+    COMMENT "Copying ${GAME3D_FONT_FILE} and ${GAME3D_SERVERS_FILE} next to game3d"
     VERBATIM)

@@ -102,6 +102,31 @@ Texture prim_load_texture(const char *filename) {
     return tex;
 }
 
+Texture prim_make_default_texture(void) {
+    /* Спокойная клетка травы/земли: игра остаётся запускаемой без внешнего
+     * файла текстуры, а карты всё ещё могут загрузить собственные текстуры. */
+    static const unsigned char pixels[12] = {
+        78, 126, 66,   92, 146, 75,
+        92, 146, 75,   78, 126, 66
+    };
+    Texture tex = {0, 0, 0};
+
+    glGenTextures(1, &tex.id);
+    if (tex.id == 0) return tex;
+    glBindTexture(GL_TEXTURE_2D, tex.id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 2, 2, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, pixels);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    tex.width = 2;
+    tex.height = 2;
+    return tex;
+}
+
 void prim_free_texture(Texture *tex) {
     if (tex->id != 0) {
         glDeleteTextures(1, &tex->id);
