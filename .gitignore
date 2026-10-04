@@ -4,8 +4,7 @@ cmake-build-*/
 .vs/
 *.user
 *.suo
-game3d
-game3d.exe
+game3d-server
+game3d-server.exe
 *.o
 *.d
-*.raw
