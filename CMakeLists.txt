@@ -11,9 +11,22 @@ option(GAME3D_SANITIZERS
        "Enable AddressSanitizer and UndefinedBehaviorSanitizer"
        OFF)
 
-add_executable(game3d-server server.c)
+add_executable(game3d-server
+    main.c
+    commands.c
+    config.c
+    log.c
+    protocol.c
+    server.c
+    socket.c
+    map/map.c
+    player/col.c
+    player/rayvisible.c
+)
 
 target_compile_features(game3d-server PRIVATE c_std_11)
+# Заголовки подключаются от корня проекта: "socket.h", "map/map.h", ...
+target_include_directories(game3d-server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(MSVC)
     target_compile_options(game3d-server PRIVATE /W4 /permissive-)
