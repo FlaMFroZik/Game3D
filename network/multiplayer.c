@@ -512,27 +512,31 @@ void multiplayer_update(MultiplayerClient *client, double now) {
 void multiplayer_send_transform(MultiplayerClient *client,
                                 float x, float y, float z,
                                 float look_x, float look_y, float look_z) {
-    unsigned char packet[25];
+    unsigned char packet[29];
 
     if (!client->joined || !client->socket_open) return;
 
     packet[0] = MP_PACKET_TRANSFORM;
-    write_f32_be(packet + 1,  x);
-    write_f32_be(packet + 5,  y);
-    write_f32_be(packet + 9,  z);
-    write_f32_be(packet + 13, look_x);
-    write_f32_be(packet + 17, look_y);
-    write_f32_be(packet + 21, look_z);
+    write_u32_be(packet + 1, client->player_id);
+    write_f32_be(packet + 5,  x);
+    write_f32_be(packet + 9,  y);
+    write_f32_be(packet + 13, z);
+    write_f32_be(packet + 17, look_x);
+    write_f32_be(packet + 21, look_y);
+    write_f32_be(packet + 25, look_z);
     (void)send_packet(client, packet, sizeof packet);
 }
 
 void multiplayer_request_visible_players(MultiplayerClient *client, double now) {
-    const unsigned char packet[] = {MP_PACKET_PLAYERS};
+    unsigned char packet[5];
 
     if (!client->joined || !client->socket_open ||
         now < client->next_players_request_at) {
         return;
     }
+
+    packet[0] = MP_PACKET_PLAYERS;
+    write_u32_be(packet + 1, client->player_id);
     if (send_packet(client, packet, sizeof packet)) {
         client->next_players_request_at = now + MP_PLAYERS_POLL_SECONDS;
     }

@@ -103,12 +103,12 @@ int multiplayer_connect(MultiplayerClient *client, const char *endpoint,
  * Вызывать каждый кадр в меню подключения и во время сетевой игры. */
 void multiplayer_update(MultiplayerClient *client, double now);
 
-/* Посылает предусмотренный протоколом пакет [3][x][y][z][lx][ly][lz]. */
+/* Посылает предусмотренный протоколом пакет [3][ID][x][y][z][lx][ly][lz]. */
 void multiplayer_send_transform(MultiplayerClient *client,
                                 float x, float y, float z,
                                 float look_x, float look_y, float look_z);
 
-/* Посылает [4] не чаще десяти раз в секунду, чтобы получить видимых игроков. */
+/* Посылает [4][ID] не чаще десяти раз в секунду, чтобы получить видимых игроков. */
 void multiplayer_request_visible_players(MultiplayerClient *client, double now);
 
 /* Посылает [5] для удаления ID на сервере и закрывает клиентский UDP-сокет.
