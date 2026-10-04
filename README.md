@@ -3,6 +3,9 @@
 простая 3D стрелялка
 версия 3.0
 
+<img width="1920" height="996" alt="image" src="https://github.com/user-attachments/assets/d257e222-b477-4836-8440-ad55deca2269" />
+
+
 я работаю над быстрой 
 
 ## Сборка
