@@ -32,6 +32,9 @@ typedef struct {
  * glTexImage2D — без платформозависимой зависимости от GLU. */
 Texture prim_load_texture(const char *filename);
 
+/* Встроенная 2x2 текстура для запуска игры без обязательного .raw аргумента. */
+Texture prim_make_default_texture(void);
+
 /* Освобождает текстуру, созданную prim_load_texture (id обнуляется). */
 void prim_free_texture(Texture *tex);
 

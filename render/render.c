@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdio.h>
 
 #include <GL/gl.h>
 
@@ -100,7 +101,18 @@ int render_init(Renderer *r, const char *texture_file) {
     r->near_plane = RENDER_NEAR;
     r->far_plane = RENDER_FAR;
 
-    r->texture = prim_load_texture(texture_file);
+    r->texture.id = 0;
+    r->texture.width = 0;
+    r->texture.height = 0;
+    if (texture_file && texture_file[0] != '\0') {
+        r->texture = prim_load_texture(texture_file);
+    }
+    if (r->texture.id == 0) {
+        if (texture_file && texture_file[0] != '\0') {
+            fprintf(stderr, "Using built-in texture instead of '%s'.\n", texture_file);
+        }
+        r->texture = prim_make_default_texture();
+    }
     return r->texture.id != 0;
 }
 
@@ -210,4 +222,55 @@ void render_world(const Renderer *r, const Player *player) {
     }
 
     glDisable(GL_TEXTURE_2D);
+}
+
+/* У удалённого игрока нет своей текстуры в сетевом протоколе, поэтому
+ * рисуем компактный цветной силуэт. Линия перед ним использует look X/Y/Z
+ * из ответа [4] и показывает направление взгляда. */
+static void draw_remote_player(const MultiplayerRemotePlayer *player) {
+    const float half_width = 0.28f;
+    const float bottom = player->y - 1.0f;
+    const float top = player->y + 0.75f;
+    const float left = player->x - half_width;
+    const float right = player->x + half_width;
+    const float near = player->z - half_width;
+    const float far = player->z + half_width;
+
+    glColor3f(0.96f, 0.76f, 0.18f);
+    glBegin(GL_QUADS);
+    /* Верх и низ. */
+    glVertex3f(left, top, near);    glVertex3f(right, top, near);
+    glVertex3f(right, top, far);    glVertex3f(left, top, far);
+    glVertex3f(left, bottom, far);  glVertex3f(right, bottom, far);
+    glVertex3f(right, bottom, near); glVertex3f(left, bottom, near);
+    /* Четыре стенки. */
+    glVertex3f(left, bottom, near); glVertex3f(right, bottom, near);
+    glVertex3f(right, top, near);   glVertex3f(left, top, near);
+    glVertex3f(right, bottom, far); glVertex3f(left, bottom, far);
+    glVertex3f(left, top, far);     glVertex3f(right, top, far);
+    glVertex3f(left, bottom, far);  glVertex3f(left, bottom, near);
+    glVertex3f(left, top, near);    glVertex3f(left, top, far);
+    glVertex3f(right, bottom, near); glVertex3f(right, bottom, far);
+    glVertex3f(right, top, far);    glVertex3f(right, top, near);
+    glEnd();
+
+    glColor3f(1.0f, 0.94f, 0.54f);
+    glBegin(GL_LINES);
+    glVertex3f(player->x, player->y, player->z);
+    glVertex3f(player->x + player->look_x * 0.9f,
+               player->y + player->look_y * 0.9f,
+               player->z + player->look_z * 0.9f);
+    glEnd();
+}
+
+void render_remote_players(const MultiplayerRemotePlayer *players, int count) {
+    if (!players || count <= 0) return;
+
+    glDisable(GL_TEXTURE_2D);
+    for (int i = 0; i < count; i++) {
+        draw_remote_player(&players[i]);
+    }
+    /* Мир рисуется с GL_MODULATE: не оставляем базовую текстуру жёлтой в
+     * следующем кадре. */
+    glColor3f(1.0f, 1.0f, 1.0f);
 }
