@@ -69,6 +69,10 @@ typedef enum {
 #define MAP_CLOSE_SIZE       28.0f
 #define MAP_LIST_SCROLL_HINT "КРУТИТЕ КОЛЕСО МЫШИ"
 
+#define DIRECT_PANEL_W      460.0f
+#define DIRECT_PANEL_H      230.0f
+#define DIRECT_INPUT_H       44.0f
+
 /* ---------- Ввод ---------- */
 
 /* Состояние клавиш превращаем в намерения игрока — physics не знает про GLFW. */
@@ -236,6 +240,8 @@ typedef struct {
  * проверки ответа [1] в network/multiplayer.c. */
 typedef struct {
     int scroll;
+    int direct_open;
+    char direct_endpoint[MULTIPLAYER_ENDPOINT_MAX + 1];
 } ServerMenu;
 
 /* Возвращает SCREEN_PLAYING и пишет путь к карте в out (пустая строка —
@@ -307,6 +313,56 @@ static Screen draw_map_list(Ui *ui, MapMenu *menu, char *out, size_t out_size) {
     return SCREEN_MAP_LIST;
 }
 
+/* Адрес сервера состоит только из ASCII: IPv4/IPv6, имя хоста и порт.
+ * Пробелы и прочие знаки не вводим, чтобы поле сразу содержало endpoint,
+ * который можно безопасно передать getaddrinfo. */
+static int direct_endpoint_character(int codepoint) {
+    return (codepoint >= 'a' && codepoint <= 'z') ||
+           (codepoint >= 'A' && codepoint <= 'Z') ||
+           (codepoint >= '0' && codepoint <= '9') ||
+           codepoint == '.' || codepoint == ':' || codepoint == '-' ||
+           codepoint == '_' || codepoint == '[' || codepoint == ']' ||
+           codepoint == '%';
+}
+
+/* Забирает накопленные события клавиатуры. Enter работает так же, как кнопка
+ * «ЗАЙТИ»; Backspace поддерживает удержание благодаря GLFW_REPEAT. */
+static int update_direct_endpoint(ServerMenu *menu) {
+    int submit = 0;
+    int event;
+
+    while ((event = win_text_event()) != 0) {
+        size_t length = strlen(menu->direct_endpoint);
+        if (event == WIN_TEXT_BACKSPACE) {
+            if (length > 0) menu->direct_endpoint[length - 1] = '\0';
+        } else if (event == WIN_TEXT_ENTER) {
+            submit = 1;
+        } else if (direct_endpoint_character(event) &&
+                   length < MULTIPLAYER_ENDPOINT_MAX) {
+            menu->direct_endpoint[length] = (char)event;
+            menu->direct_endpoint[length + 1] = '\0';
+        }
+    }
+    return submit;
+}
+
+/* Длинный адрес показываем с конца: порт и последние группы IPv6 при вводе
+ * важнее начала, а текст не должен вылезать за рамку поля. */
+static const char *direct_endpoint_visible(const Ui *ui, const char *endpoint,
+                                           float max_width, char *out,
+                                           size_t out_size) {
+    const char *start = endpoint;
+    if (endpoint[0] == '\0') return "IP:PORT";
+
+    while (start[0] != '\0') {
+        snprintf(out, out_size, "%s|", start);
+        if (ui_text_width(ui, out, 1.0f) <= max_width) return out;
+        start++;
+    }
+    snprintf(out, out_size, "|");
+    return out;
+}
+
 /* Сервер не запускается и не поставляется с клиентом. Браузер сначала
  * опрашивает LAN broadcast, потом читает servers.txt рядом с игрой. */
 static Screen draw_multiplayer_menu(Ui *ui, MultiplayerClient *client,
@@ -322,7 +378,13 @@ static Screen draw_multiplayer_menu(Ui *ui, MultiplayerClient *client,
     const int rows_visible = 6;
     const float row_h = 34.0f * s;
     const float list_top = panel.y + 148.0f * s;
+    const int modal_was_open = menu->direct_open;
+    const int saved_clicked = ui->clicked;
     char text[160];
+
+    /* Пока открыто прямое подключение, фон остаётся виден, но его кнопки
+     * не получают клик сквозь модальное окно. */
+    if (modal_was_open) ui->clicked = 0;
 
     ui_fill(panel, UI_COLOR_PANEL);
     ui_border(panel, MENU_EDGE(s), UI_COLOR_PANEL_EDGE);
@@ -387,6 +449,17 @@ static Screen draw_multiplayer_menu(Ui *ui, MultiplayerClient *client,
     const float button_w = panel.w - 2.0f * pad;
     const float button_x = panel.x + pad;
 
+    if (ui_button(ui, ui_rect(button_x, panel.y + 400.0f * s,
+                              button_w, MENU_BUTTON_H * s),
+                  "ПОДКЛЮЧИТЬСЯ НАПРЯМУЮ", UI_BUTTON_DEFAULT)) {
+        menu->direct_open = 1;
+        menu->direct_endpoint[0] = '\0';
+        /* Не переносим в поле символы, набранные до его открытия. */
+        win_reset_input();
+        /* Открывающий клик не должен сразу нажать элемент модального окна. */
+        ui->clicked = 0;
+    }
+
     const float footer_y = panel.y + panel.h - pad - MENU_BUTTON_H * s;
     const float footer_gap = 10.0f * s;
     const float footer_w = (button_w - footer_gap) * 0.5f;
@@ -400,6 +473,62 @@ static Screen draw_multiplayer_menu(Ui *ui, MultiplayerClient *client,
                               footer_w, MENU_BUTTON_H * s),
                   "НАЗАД", UI_BUTTON_DANGER)) {
         return SCREEN_MAIN_MENU;
+    }
+
+    if (menu->direct_open) {
+        static const float shade[4] = {0.0f, 0.0f, 0.0f, 0.55f};
+        char input_text[MULTIPLAYER_ENDPOINT_MAX + 2];
+        const UiRect direct = ui_centered(ui, DIRECT_PANEL_W * s,
+                                         DIRECT_PANEL_H * s);
+        const float direct_pad = MENU_PANEL_PAD * s;
+        const float close_size = MAP_CLOSE_SIZE * s;
+        const UiRect close = ui_rect(direct.x + direct.w - direct_pad - close_size,
+                                     direct.y + direct_pad, close_size, close_size);
+        const UiRect input = ui_rect(direct.x + direct_pad,
+                                     direct.y + 88.0f * s,
+                                     direct.w - 2.0f * direct_pad,
+                                     DIRECT_INPUT_H * s);
+        const UiRect join = ui_rect(direct.x + direct_pad,
+                                    direct.y + direct.h - direct_pad -
+                                        MENU_BUTTON_H * s,
+                                    direct.w - 2.0f * direct_pad,
+                                    MENU_BUTTON_H * s);
+        int submit;
+
+        if (modal_was_open) ui->clicked = saved_clicked;
+        submit = update_direct_endpoint(menu);
+
+        ui_fill(ui_rect(0.0f, 0.0f, (float)ui->width, (float)ui->height), shade);
+        ui_fill(direct, UI_COLOR_PANEL);
+        ui_border(direct, MENU_EDGE(s), UI_COLOR_PANEL_EDGE);
+        ui_label(ui, direct.x + direct_pad, direct.y + direct_pad,
+                 MENU_HEAD_SCALE, UI_COLOR_TEXT, "ПРЯМОЕ ПОДКЛЮЧЕНИЕ");
+
+        if (ui_button(ui, close, "X", UI_BUTTON_DEFAULT) ||
+            win_escape_pressed()) {
+            menu->direct_open = 0;
+            win_reset_input();
+            return SCREEN_MULTIPLAYER;
+        }
+
+        ui_fill(input, UI_COLOR_BUTTON);
+        ui_border(input, MENU_EDGE(s), UI_COLOR_BUTTON_EDGE);
+        const char *visible = direct_endpoint_visible(
+            ui, menu->direct_endpoint, input.w - 20.0f * s,
+            input_text, sizeof input_text);
+        ui_label(ui, input.x + 10.0f * s,
+                 input.y + (input.h - ui_text_height(ui, 1.0f)) * 0.5f,
+                 1.0f,
+                 menu->direct_endpoint[0] ? UI_COLOR_TEXT : UI_COLOR_TEXT_DIM,
+                 visible);
+
+        if (ui_button(ui, join, "ЗАЙТИ", UI_BUTTON_DEFAULT)) submit = 1;
+        if (submit && menu->direct_endpoint[0] != '\0') {
+            multiplayer_server_browser_stop(browser);
+            (void)multiplayer_connect(client, menu->direct_endpoint, now);
+            menu->direct_open = 0;
+            win_reset_input();
+        }
     }
 
     return SCREEN_MULTIPLAYER;
