@@ -233,25 +233,26 @@ static void draw_remote_player(const MultiplayerRemotePlayer *player) {
     const float top = player->y + 0.75f;
     const float left = player->x - half_width;
     const float right = player->x + half_width;
-    const float near = player->z - half_width;
-    const float far = player->z + half_width;
+    /* near/far назвать нельзя: windows.h объявляет их устаревшими макросами. */
+    const float z_near = player->z - half_width;
+    const float z_far = player->z + half_width;
 
     glColor3f(0.96f, 0.76f, 0.18f);
     glBegin(GL_QUADS);
     /* Верх и низ. */
-    glVertex3f(left, top, near);    glVertex3f(right, top, near);
-    glVertex3f(right, top, far);    glVertex3f(left, top, far);
-    glVertex3f(left, bottom, far);  glVertex3f(right, bottom, far);
-    glVertex3f(right, bottom, near); glVertex3f(left, bottom, near);
+    glVertex3f(left, top, z_near);    glVertex3f(right, top, z_near);
+    glVertex3f(right, top, z_far);    glVertex3f(left, top, z_far);
+    glVertex3f(left, bottom, z_far);  glVertex3f(right, bottom, z_far);
+    glVertex3f(right, bottom, z_near); glVertex3f(left, bottom, z_near);
     /* Четыре стенки. */
-    glVertex3f(left, bottom, near); glVertex3f(right, bottom, near);
-    glVertex3f(right, top, near);   glVertex3f(left, top, near);
-    glVertex3f(right, bottom, far); glVertex3f(left, bottom, far);
-    glVertex3f(left, top, far);     glVertex3f(right, top, far);
-    glVertex3f(left, bottom, far);  glVertex3f(left, bottom, near);
-    glVertex3f(left, top, near);    glVertex3f(left, top, far);
-    glVertex3f(right, bottom, near); glVertex3f(right, bottom, far);
-    glVertex3f(right, top, far);    glVertex3f(right, top, near);
+    glVertex3f(left, bottom, z_near); glVertex3f(right, bottom, z_near);
+    glVertex3f(right, top, z_near);   glVertex3f(left, top, z_near);
+    glVertex3f(right, bottom, z_far); glVertex3f(left, bottom, z_far);
+    glVertex3f(left, top, z_far);     glVertex3f(right, top, z_far);
+    glVertex3f(left, bottom, z_far);  glVertex3f(left, bottom, z_near);
+    glVertex3f(left, top, z_near);    glVertex3f(left, top, z_far);
+    glVertex3f(right, bottom, z_near); glVertex3f(right, bottom, z_far);
+    glVertex3f(right, top, z_far);    glVertex3f(right, top, z_near);
     glEnd();
 
     glColor3f(1.0f, 0.94f, 0.54f);

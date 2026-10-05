@@ -102,6 +102,37 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
+#### Кросс-компиляция под Windows из Linux
+
+Windows-версию можно собрать на Linux кросс-компилятором MinGW-w64 — вместе с
+игрой собирается и Windows-вариант GLFW (Visual Studio на Linux-машине не
+нужна). Понадобятся cmake, git и сам MinGW-w64:
+
+```sh
+# Debian/Ubuntu
+sudo apt install gcc-mingw-w64-x86-64
+# Fedora
+sudo dnf install mingw64-gcc
+# Arch
+sudo pacman -S --needed mingw-w64-gcc
+```
+
+Сборка — через toolchain-файл `cmake/mingw-w64-x86_64.cmake` из репозитория:
+
+```sh
+cmake -S . -B build-win -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
+cmake --build build-win
+```
+
+В `build-win` получается `game3d.exe` плюс лежащие рядом `assets/fonts` и
+`servers.txt` — на Windows весь этот набор копируется целиком. Лишних DLL не
+нужно: exe опирается только на системные библиотеки Windows. Возьмите с собой
+весь каталог — без шрифта рядом игра не запустится, как и на Linux.
+
+Проверить exe без Windows можно через Wine: `wine build-win/game3d.exe`
+(OpenGL там работает через встроенный в Wine транслятор, скорость ниже, чем
+на настоящей Windows).
+
 ## Запуск
 
 ```sh
