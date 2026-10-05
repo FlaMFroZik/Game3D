@@ -4,6 +4,7 @@
 #include "render/window.h"
 
 #define WIN_BUTTON_COUNT 8   /* кнопок мыши, которые запоминаем */
+#define WIN_TEXT_QUEUE_SIZE 256
 
 static int key_state[WIN_KEY_COUNT];
 static int button_state[WIN_BUTTON_COUNT];
@@ -13,8 +14,16 @@ static int button_state[WIN_BUTTON_COUNT];
 static int button_clicked[WIN_BUTTON_COUNT];
 static double scroll_accum = 0.0;
 static int escape_pressed = 0;
+static int text_events[WIN_TEXT_QUEUE_SIZE];
+static int text_event_count = 0;
 
 static int glfw_ready = 0;
+
+static void push_text_event(int event) {
+    if (text_event_count < WIN_TEXT_QUEUE_SIZE) {
+        text_events[text_event_count++] = event;
+    }
+}
 
 static const char *glfw_error_string(void) {
     const char *description = NULL;
@@ -48,6 +57,21 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     /* Esc больше не закрывает игру сразу: его забирает меню (см. main.c). */
     if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
         escape_pressed = 1;
+    }
+    if ((action == GLFW_PRESS || action == GLFW_REPEAT) &&
+        key == GLFW_KEY_BACKSPACE) {
+        push_text_event(WIN_TEXT_BACKSPACE);
+    }
+    if (action == GLFW_PRESS &&
+        (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER)) {
+        push_text_event(WIN_TEXT_ENTER);
+    }
+}
+
+static void char_callback(GLFWwindow *window, unsigned int codepoint) {
+    (void)window;
+    if (codepoint > 0 && codepoint <= 0x10ffffu) {
+        push_text_event((int)codepoint);
     }
 }
 
@@ -111,10 +135,24 @@ int win_escape_pressed(void) {
     return pressed;
 }
 
+int win_text_event(void) {
+    int event;
+    if (text_event_count <= 0) return 0;
+
+    event = text_events[0];
+    text_event_count--;
+    if (text_event_count > 0) {
+        memmove(text_events, text_events + 1,
+                (size_t)text_event_count * sizeof text_events[0]);
+    }
+    return event;
+}
+
 void win_reset_input(void) {
     for (int i = 0; i < WIN_BUTTON_COUNT; i++) button_clicked[i] = 0;
     scroll_accum = 0.0;
     escape_pressed = 0;
+    text_event_count = 0;
 }
 
 /* ---------- Окно ---------- */
@@ -170,6 +208,7 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     glfwSwapInterval(1); /* одинаковое ограничение частоты кадров на обеих ОС */
 
     glfwSetKeyCallback(w->window, key_callback);
+    glfwSetCharCallback(w->window, char_callback);
     glfwSetMouseButtonCallback(w->window, mouse_button_callback);
     glfwSetScrollCallback(w->window, scroll_callback);
     return 1;
