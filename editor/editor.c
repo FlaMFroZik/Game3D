@@ -1053,6 +1053,12 @@ const char *editor_material_name(const Editor *ed) {
     return p ? p : "toolsnodraw";
 }
 
+/* Попадание точки (px, py) в прямоугольник. Для ввода редактора не нужен
+ * Ui: координаты курсора уже известны из кадра. */
+static int point_in_rect(float px, float py, UiRect r) {
+    return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
+}
+
 /* ---------- Кадр обновления (ввод) ---------- */
 
 void editor_update(Editor *ed, double dt, int win_w, int win_h) {
@@ -1130,7 +1136,7 @@ void editor_update(Editor *ed, double dt, int win_w, int win_h) {
     /* Определение активного видового экрана под курсором */
     for (int i = 0; i < 4; i++) {
         UiRect vpr = get_viewport_rect(ed, (ViewportIndex)i, ws);
-        if (ui_contains(NULL, vpr)) {
+        if (point_in_rect(mx, my, vpr)) {
             /* Обновление мировых координат курсора для статус-бара */
             if (i != VIEWPORT_3D) {
                 float wa, wb;
@@ -1157,7 +1163,7 @@ void editor_update(Editor *ed, double dt, int win_w, int win_h) {
         for (int i = 0; i < 4; i++) {
             if (i == VIEWPORT_3D) continue;
             UiRect vpr = get_viewport_rect(ed, (ViewportIndex)i, ws);
-            if (ui_contains(NULL, vpr)) {
+            if (point_in_rect(mx, my, vpr)) {
                 float factor = (wheel > 0) ? 1.25f : 0.8f;
                 ed->views2d[i].zoom *= factor;
                 if (ed->views2d[i].zoom < 2.0f) ed->views2d[i].zoom = 2.0f;
@@ -1172,7 +1178,7 @@ void editor_update(Editor *ed, double dt, int win_w, int win_h) {
         if (v == VIEWPORT_3D) continue;
         ViewportIndex vp = (ViewportIndex)v;
         UiRect vpr = get_viewport_rect(ed, vp, ws);
-        if (!ui_contains(NULL, vpr)) continue;
+        if (!point_in_rect(mx, my, vpr)) continue;
 
         /* Панорамирование правой или средней кнопкой */
         if (win_mouse_down(1) || win_mouse_down(2)) {
@@ -1297,7 +1303,7 @@ void editor_update(Editor *ed, double dt, int win_w, int win_h) {
 
     /* Взаимодействие с 3D Viewport */
     UiRect r3d = get_viewport_rect(ed, VIEWPORT_3D, ws);
-    if (ui_contains(NULL, r3d)) {
+    if (point_in_rect(mx, my, r3d)) {
         /* Raycast выбор куба */
         float dir[3];
         render_view_dir(&ed->cam, &dir[0], &dir[1], &dir[2]);

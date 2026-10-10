@@ -25,6 +25,19 @@ static double mouse_dx = 0.0, mouse_dy = 0.0;
 
 static int glfw_ready = 0;
 
+/* Окно, открытое последним win_init: у редактора оно одно, и не у каждого
+ * вызова есть под рукой его указатель (см. editor_toggle_3d_freelook).
+ * NULL в параметре функций ниже означает «текущее окно». */
+static WinWindow *current_window = NULL;
+
+static WinWindow *resolve_window(WinWindow *w) {
+    return w ? w : current_window;
+}
+
+static const WinWindow *resolve_window_const(const WinWindow *w) {
+    return w ? w : current_window;
+}
+
 static const char *glfw_error_string(void) {
     const char *description = NULL;
     glfwGetError(&description);
@@ -115,8 +128,10 @@ static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) 
 
 static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
     (void)window;
-    if (!mouse_captured) return;
 
+    /* Смещение копится всегда, а не только в захвате: панорамирование 2D-видов
+     * правой/средней кнопкой работает с обычным курсором (win_mouse_delta).
+     * Непрочитанный остаток сбрасывается в конце кадра (win_swap). */
     if (mouse_have_last) {
         mouse_dx += x - mouse_last_x;
         mouse_dy += y - mouse_last_y;
@@ -155,6 +170,7 @@ void win_set_mouse_captured(WinWindow *w, int captured) {
     if (mouse_captured == captured) return;
     mouse_captured = captured;
 
+    w = resolve_window(w);
     if (w && w->window) {
         glfwSetInputMode(w->window, GLFW_CURSOR,
                          captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
@@ -190,6 +206,7 @@ int win_mouse_down(int button) {
 }
 
 void win_pointer_pixels(const WinWindow *w, int *x, int *y) {
+    w = resolve_window_const(w);
     if (!w || !w->window) {
         if (x) *x = 0;
         if (y) *y = 0;
@@ -294,10 +311,15 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     glfwSetMouseButtonCallback(w->window, mouse_button_callback);
     glfwSetScrollCallback(w->window, scroll_callback);
     glfwSetCursorPosCallback(w->window, cursor_pos_callback);
+
+    current_window = w;
     return 1;
 }
 
 void win_shutdown(WinWindow *w) {
+    if (current_window == w) {
+        current_window = NULL;
+    }
     if (w->window) {
         glfwDestroyWindow(w->window);
         w->window = NULL;
@@ -310,7 +332,8 @@ void win_shutdown(WinWindow *w) {
 
 int win_poll(WinWindow *w) {
     glfwPollEvents();
-    if (w->window && glfwWindowShouldClose(w->window)) {
+    w = resolve_window(w);
+    if (w && w->window && glfwWindowShouldClose(w->window)) {
         return 1;
     }
     return 0;
@@ -321,6 +344,7 @@ double win_time_seconds(void) {
 }
 
 void win_size(const WinWindow *w, int *width, int *height) {
+    w = resolve_window_const(w);
     if (w && w->window) {
         glfwGetFramebufferSize(w->window, width, height);
     } else {
@@ -330,7 +354,15 @@ void win_size(const WinWindow *w, int *width, int *height) {
 }
 
 void win_swap(const WinWindow *w) {
+    w = resolve_window_const(w);
     if (w && w->window) {
         glfwSwapBuffers(w->window);
     }
+
+    /* Конец кадра: смещение мыши, которое никто не прочитал (не было ни
+     * панорамирования, ни 3D-обзора), не должно копиться до следующего
+     * действия — иначе первый кадр перетаскивания дёргает вид на всё
+     * накопленное расстояние. */
+    mouse_dx = 0.0;
+    mouse_dy = 0.0;
 }
