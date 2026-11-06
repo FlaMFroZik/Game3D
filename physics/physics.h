@@ -9,7 +9,10 @@
 
 #define PHYS_MOVE_SPEED  8.0f   /* скорость ходьбы, мировых единиц в секунду */
 #define PHYS_RUN_FACTOR  2.0f   /* во сколько раз бег быстрее ходьбы (Shift) */
-#define PHYS_LOOK_SPEED  1.2f   /* скорость поворота камеры, радиан в секунду */
+/* Чувствительность обзора мышью: радиан поворота на пиксель смещения.
+ * Обзор событийный (сколько мышь сдвинулась — на столько и повернулись),
+ * поэтому от частоты кадров и шага физики он не зависит. */
+#define PHYS_MOUSE_SENSITIVITY 0.0028f
 #define PHYS_GRAVITY    -9.8f   /* ускорение свободного падения */
 #define PHYS_JUMP_FORCE  6.0f   /* начальная скорость прыжка */
 #define PHYS_PITCH_LIMIT 1.5f   /* куда можно задирать/опускать взгляд */
@@ -28,8 +31,6 @@ typedef struct {
 typedef struct {
     float forward;   /* -1 назад, +1 вперёд */
     float strafe;    /* -1 влево, +1 вправо */
-    float look_x;    /* -1 влево, +1 вправо */
-    float look_y;    /* -1 вниз,  +1 вверх */
     int   jump;      /* пробел */
     int   run;       /* shift — ускорение */
 } PlayerInput;
@@ -38,6 +39,11 @@ void phys_init(Player *p);
 
 /* Один шаг физики с фиксированным dt (в секундах). */
 void phys_update(Player *p, const PlayerInput *in, double dt);
+
+/* Поворот камеры на приращение углов (радианы): +d_yaw — вправо,
+ * +d_pitch — вверх. Наклон ограничен PHYS_PITCH_LIMIT.
+ * Вызывается из игрового цикла на смещение мыши за кадр. */
+void phys_look(Player *p, float d_yaw, float d_pitch);
 
 /* Единичный вектор взгляда камеры. */
 void phys_view_dir(const Player *p, float *dx, float *dy, float *dz);

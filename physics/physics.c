@@ -99,12 +99,12 @@ static void move_vertical(Player *p, const PlayerInput *in, float step) {
     p->y = next_y;
 }
 
-/* Поворот камеры; наклон ограничен PHYS_PITCH_LIMIT. */
-static void look(Player *p, const PlayerInput *in, float step) {
-    const float angle = PHYS_LOOK_SPEED * step;
-
-    p->yaw   += in->look_x * angle;
-    p->pitch += in->look_y * angle;
+/* Обзор мышью: углы меняются ровно на смещение мыши, накопленное за кадр.
+ * Скорость поворота при этом равна скорости движения руки, а не частоте
+ * кадров; наклон ограничен PHYS_PITCH_LIMIT. */
+void phys_look(Player *p, float d_yaw, float d_pitch) {
+    p->yaw   += d_yaw;
+    p->pitch += d_pitch;
 
     if (p->pitch >  PHYS_PITCH_LIMIT) p->pitch =  PHYS_PITCH_LIMIT;
     if (p->pitch < -PHYS_PITCH_LIMIT) p->pitch = -PHYS_PITCH_LIMIT;
@@ -115,5 +115,4 @@ void phys_update(Player *p, const PlayerInput *in, double dt) {
 
     move_horizontal(p, in, step);
     move_vertical(p, in, step);
-    look(p, in, step);
 }
