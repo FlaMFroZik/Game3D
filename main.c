@@ -79,8 +79,6 @@ typedef enum {
 static void read_input(PlayerInput *in) {
     in->forward = (float)(win_key_down(WIN_KEY_W) - win_key_down(WIN_KEY_S));
     in->strafe  = (float)(win_key_down(WIN_KEY_D) - win_key_down(WIN_KEY_A));
-    in->look_x  = (float)(win_key_down(WIN_KEY_RIGHT) - win_key_down(WIN_KEY_LEFT));
-    in->look_y  = (float)(win_key_down(WIN_KEY_UP) - win_key_down(WIN_KEY_DOWN));
     in->jump    = win_key_down(WIN_KEY_SPACE);
     in->run     = win_key_down(WIN_KEY_SHIFT);
 }
@@ -660,6 +658,17 @@ int main(void) {
         fps_update(&fps, frame_time);
 
         if (screen == SCREEN_PLAYING) {
+            /* Обзор мышью. Смещение копится между кадрами и снимается один
+             * раз, а не на каждый шаг физики — иначе камера крутилась бы
+             * быстрее на высоком FPS. Курсор при этом скрыт и удерживается
+             * в центре окна (win_mouse_capture), поэтому он не упирается
+             * в край экрана. */
+            double mouse_dx = 0.0, mouse_dy = 0.0;
+            win_mouse_delta(&mouse_dx, &mouse_dy);
+            phys_look(&player,
+                      (float)mouse_dx * PHYS_MOUSE_SENSITIVITY,
+                      -(float)mouse_dy * PHYS_MOUSE_SENSITIVITY);
+
             double delta = frame_time - last_time;
             last_time = frame_time;
 
@@ -699,6 +708,8 @@ int main(void) {
             /* Esc больше не закрывает игру, а открывает паузу. */
             if (win_escape_pressed()) {
                 screen = SCREEN_PAUSE;
+                /* В меню паузы нужен обычный курсор. */
+                win_mouse_capture(0);
                 win_reset_input();
             }
 
@@ -775,6 +786,7 @@ int main(void) {
             phys_init(&player);
             accumulator = 0.0;
             last_time = win_time_seconds();
+            win_mouse_capture(1);
             win_reset_input();
         } else if (screen == SCREEN_MULTIPLAYER && next == SCREEN_PLAYING) {
             /* Карта в [1] — имя уже установленного у клиента файла. Если её
@@ -785,6 +797,7 @@ int main(void) {
             phys_init(&player);
             accumulator = 0.0;
             last_time = win_time_seconds();
+            win_mouse_capture(1);
             win_reset_input();
         } else if (screen == SCREEN_MULTIPLAYER && next == SCREEN_MAIN_MENU) {
             multiplayer_server_browser_stop(&server_browser);
@@ -794,12 +807,14 @@ int main(void) {
             /* Продолжаем ту же партию: мир и игрок остаются на месте. */
             accumulator = 0.0;
             last_time = win_time_seconds();
+            win_mouse_capture(1);
             win_reset_input();
         } else if (screen == SCREEN_PAUSE && next == SCREEN_MAIN_MENU) {
             /* Выход из партии: мир освобождаем, пока контекст жив. */
             if (multiplayer_game) multiplayer_disconnect(&multiplayer);
             multiplayer_game = 0;
             map_free();
+            win_mouse_capture(0);
             win_reset_input();
         } else if (next != screen) {
             win_reset_input();

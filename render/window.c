@@ -17,6 +17,15 @@ static int escape_pressed = 0;
 static int text_events[WIN_TEXT_QUEUE_SIZE];
 static int text_event_count = 0;
 
+/* Смещение мыши для обзора в игре. Накапливается в колбэке движения
+ * курсора и снимается чтением один раз за кадр. */
+static double mouse_dx = 0.0;
+static double mouse_dy = 0.0;
+static double mouse_last_x = 0.0;
+static double mouse_last_y = 0.0;
+static int mouse_tracking = 0;
+static int mouse_captured = 0;
+
 static int glfw_ready = 0;
 
 static void push_text_event(int event) {
@@ -42,10 +51,6 @@ static int key_slot(int key) {
         case GLFW_KEY_SPACE: return WIN_KEY_SPACE;
         case GLFW_KEY_LEFT_SHIFT:
         case GLFW_KEY_RIGHT_SHIFT: return WIN_KEY_SHIFT;
-        case GLFW_KEY_UP:   return WIN_KEY_UP;
-        case GLFW_KEY_DOWN: return WIN_KEY_DOWN;
-        case GLFW_KEY_LEFT: return WIN_KEY_LEFT;
-        case GLFW_KEY_RIGHT: return WIN_KEY_RIGHT;
         default:            return -1;
     }
 }
@@ -80,6 +85,38 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
     if (button >= 0 && button < WIN_BUTTON_COUNT) {
         button_state[button] = (action != GLFW_RELEASE);
         if (action == GLFW_PRESS) button_clicked[button] = 1;
+    }
+}
+
+/* Первое событие после захвата только запоминает позицию: иначе скачок
+ * курсора в центр окна превратился бы в резкий поворот камеры. */
+static void cursor_position_callback(GLFWwindow *window, double x, double y) {
+    (void)window;
+    /* В меню курсор обычный: его координаты нужны интерфейсу, и в обзор
+     * они попадать не должны. */
+    if (!mouse_captured) return;
+
+    if (!mouse_tracking) {
+        mouse_last_x = x;
+        mouse_last_y = y;
+        mouse_tracking = 1;
+        return;
+    }
+
+    mouse_dx += x - mouse_last_x;
+    mouse_dy += y - mouse_last_y;
+    mouse_last_x = x;
+    mouse_last_y = y;
+}
+
+/* Потеря фокуса не должна превращаться в рывок камеры: смещение,
+ * накопленное до Alt+Tab, отбрасываем. */
+static void focus_callback(GLFWwindow *window, int focused) {
+    (void)window;
+    if (!focused) {
+        mouse_dx = 0.0;
+        mouse_dy = 0.0;
+        mouse_tracking = 0;
     }
 }
 
@@ -123,6 +160,44 @@ int win_mouse_clicked(int button) {
     return clicked;
 }
 
+void win_mouse_capture(int capture) {
+    capture = capture ? 1 : 0;
+    mouse_dx = 0.0;
+    mouse_dy = 0.0;
+
+    GLFWwindow *context = glfw_ready ? glfwGetCurrentContext() : NULL;
+    if (!context) {
+        mouse_captured = capture;
+        return;
+    }
+
+    glfwSetInputMode(context, GLFW_CURSOR,
+                     capture ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    mouse_captured = capture;
+    /* Позицию запомнит первое событие курсора (см. cursor_position_callback),
+     * поэтому перецентрирование не даёт скачка камеры. */
+    mouse_tracking = 0;
+
+    if (!capture) {
+        /* Меню открывается с курсором в центре окна, а не там, где его
+         * «оставил» захват: иначе указатель мог оказаться у края. */
+        int width = 1, height = 1;
+        glfwGetWindowSize(context, &width, &height);
+        glfwSetCursorPos(context, (double)width * 0.5, (double)height * 0.5);
+    }
+}
+
+int win_mouse_captured(void) {
+    return mouse_captured;
+}
+
+void win_mouse_delta(double *dx, double *dy) {
+    if (dx) *dx = mouse_dx;
+    if (dy) *dy = mouse_dy;
+    mouse_dx = 0.0;
+    mouse_dy = 0.0;
+}
+
 double win_scroll_delta(void) {
     const double delta = scroll_accum;
     scroll_accum = 0.0;
@@ -151,6 +226,9 @@ int win_text_event(void) {
 void win_reset_input(void) {
     for (int i = 0; i < WIN_BUTTON_COUNT; i++) button_clicked[i] = 0;
     scroll_accum = 0.0;
+    mouse_dx = 0.0;
+    mouse_dy = 0.0;
+    mouse_tracking = 0;
     escape_pressed = 0;
     text_event_count = 0;
 }
@@ -211,11 +289,16 @@ int win_init(WinWindow *w, int width, int height, const char *title) {
     glfwSetCharCallback(w->window, char_callback);
     glfwSetMouseButtonCallback(w->window, mouse_button_callback);
     glfwSetScrollCallback(w->window, scroll_callback);
+    glfwSetCursorPosCallback(w->window, cursor_position_callback);
+    glfwSetWindowFocusCallback(w->window, focus_callback);
     return 1;
 }
 
 void win_shutdown(WinWindow *w) {
     if (w->window) {
+        /* Курсор обязан вернуться в обычный режим: иначе после закрытия
+         * окна он останется скрытым в системе. */
+        if (mouse_captured) win_mouse_capture(0);
         glfwDestroyWindow(w->window);
         w->window = NULL;
     }
