@@ -29,7 +29,7 @@ cmake --build build --config Release
 Пакеты разработки, если их ещё нет:
 
 ```sh
-# Debian/Ubuntu (метапакеты тянут всё нужное)
+# Debian/Ubuntu
 sudo apt install xorg-dev libglu1-mesa-dev
 # Fedora
 sudo dnf install libX11-devel libXrandr-devel libXinerama-devel \
@@ -37,13 +37,6 @@ sudo dnf install libX11-devel libXrandr-devel libXinerama-devel \
 # Arch
 sudo pacman -S --needed libx11 libxrandr libxinerama libxcursor libxi libxext mesa
 ```
-
-CMake определяет дистрибутив по `/etc/os-release` и при нехватке заголовков
-печатает готовую команду установки — её можно скопировать в терминал как есть.
-Для незнакомого дистрибутива вместо команды будет список нужных библиотек.
-
-Пока конфигурация не прошла до конца, `cmake --build build` работать не будет —
-Makefile создаётся только на успешной конфигурации.
 
 #### Fedora Atomic: Silverblue, Kinoite, Bazzite
 
@@ -56,29 +49,16 @@ sudo rpm-ostree install libX11-devel libXrandr-devel libXinerama-devel \
      libXcursor-devel libXi-devel libXext-devel mesa-libGL-devel
 systemctl reboot
 
-# 2. Или в контейнере toolbox — система не меняется:
+# 2. Или в контейнере toolbox (также можно использовать distrobox):
 toolbox create -c game3d && toolbox enter -c game3d
 sudo dnf install -y cmake gcc libX11-devel libXrandr-devel libXinerama-devel \
      libXcursor-devel libXi-devel libXext-devel mesa-libGL-devel
 cmake -S . -B build && cmake --build build --config Release
 ```
 
-Внутри toolbox CMake видит обычную Fedora и подсказывает обычный
-`sudo dnf install`.
+Внутри контейнера CMake видит обычную не-иммунитабельную и подсказывает обычный пакетный менеджер
 
 #### Бэкенд окна: X11 или Wayland
-
-Если glfw3 не установлен в системе, CMake сам скачает GLFW 3.4 (нужен доступ к
-github.com). GLFW 3.4 собирается с двумя бэкендами сразу — X11 и Wayland, — и
-каждый требует своих заголовков, поэтому CMake проверяет их заранее и оставляет
-в сборке то, что есть в системе:
-
-* есть заголовки X11 (Xlib, Xrandr, Xinerama, Xkb, Xcursor, XInput2, Xshape) —
-  собирается X11; на Wayland-сессии игра при этом идёт через XWayland;
-* есть только Wayland (`wayland-scanner`, `wayland-client`, `wayland-cursor`,
-  `wayland-egl`, `xkbcommon`) — собирается Wayland;
-* есть и то и другое — собираются оба, работающий выбирает GLFW во время
-  запуска.
 
 Пакеты для Wayland: `wayland-devel libxkbcommon-devel` на Fedora (в Atomic —
 тем же способом, что выше) или `libwayland-dev libxkbcommon-dev` на
@@ -95,7 +75,7 @@ Debian/Ubuntu; `libwayland-dev` тянет за собой `libwayland-bin` с
 
 ### Windows
 
-Откройте **Developer PowerShell for VS** (с годом версии в конце) и выполните
+Откройте **Developer PowerShell for VS 20XX** и выполните
 
 ```powershell
 cmake -S . -B build
@@ -108,17 +88,9 @@ cmake --build build --config Release
 ./game3d
 ```
 
-Игра не зависит от аргументов командной строки: базовая 2×2 текстура встроена
-в исполняемый файл. Карты по-прежнему выбираются в меню одиночной игры и могут
-подключать собственные текстуры.
-
-В главном меню есть отдельные кнопки **«Однопользовательская игра»** и
-**«Многопользовательская игра»**. Сервер не запускается и не поставляется с
-клиентом.
-
 ### Список серверов
 
-Для мультиплеера не нужны аргументы `--server`. При открытии экрана клиент:
+При открытии вкладки многопользовательской игры клиент:
 
 1. отправляет UDP broadcast `[1]` на `255.255.255.255:27015` и две секунды
    собирает серверы локальной сети;
@@ -146,6 +118,8 @@ server.example.org
 У протокола нет master-сервера, поэтому клиент не сканирует весь Интернет.
 Вместо этого он опрашивает все серверы, ответившие в LAN, и все адреса, которые
 явно перечислены в `servers.txt`.
+
+(Потом я обязательно добавлю master-сервер чтобы избавится от файла)
 
 ### UDP-протокол многопользовательской игры
 
@@ -240,12 +214,10 @@ tile 2
 - **Shift** — бег;
 - **Space** — прыжок;
 - **Esc** — меню паузы (в меню — «назад», в главном меню — выход); курсор при
-  этом снова становится обычным;
-- **мышь** в меню — кнопки и прокрутка списка карт.
+  этом снова становится обычным.
 
 GLFW сообщает клавиши по физическому положению на клавиатуре, поэтому WASD
-работает независимо от текущей раскладки. Обзор мышью событийный: он зависит
-только от смещения мыши, а не от частоты кадров.
+работает независимо от текущей раскладки. (соболезную тем у кого французкая раскладка)
 
 ## Структура
 
