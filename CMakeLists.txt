@@ -21,6 +21,8 @@ set(GAME3D_SOURCES
     map/gen.c
     map/list.c
     map/map.c
+    model/emf.c
+    model/prefab.c
     network/multiplayer.c
     physics/coll.c
     physics/physics.c
@@ -465,6 +467,18 @@ set_target_properties(game3d PROPERTIES
     C_STANDARD_REQUIRED YES
     C_EXTENSIONS NO
 )
+
+# Модели (.emf) и их текстуры лежат в assets/models. Каталог копируется
+# рядом с игрой целиком: префабы ищутся в <каталог игры>/assets/models,
+# поэтому модель, положенная в дерево исходников, работает и из сборки.
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/assets/models)
+    add_custom_command(TARGET game3d POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/models"
+                "$<TARGET_FILE_DIR:game3d>/assets/models"
+        COMMENT "Copying assets/models next to game3d"
+        VERBATIM)
+endif()
 
 # Шрифт меню должен лежать рядом с игрой: main.c ищет его в каталоге
 # исполняемого файла (и в текущем каталоге, если запущено из сборки).

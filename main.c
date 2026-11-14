@@ -4,6 +4,7 @@
 #include "map/gen.h"
 #include "map/list.h"
 #include "map/map.h"
+#include "model/prefab.h"
 #include "network/multiplayer.h"
 #include "physics/physics.h"
 #include "render/font.h"
@@ -614,6 +615,11 @@ int main(void) {
     }
     render_setup_gl();
 
+    /* Реестр моделей: встроенный префаб "cube" и кэш загруженных .emf.
+     * Префабы нужны карте, но живут дольше неё — текстуры моделей не
+     * перезагружаются при каждом запуске партии. */
+    prefab_init();
+
     char font_path[MAP_LIST_PATH_MAX];
     if (!find_font(font_path, sizeof font_path)) {
         fprintf(stderr, "Cannot find font %s/%s next to the game.\n",
@@ -849,6 +855,8 @@ int main(void) {
     multiplayer_server_browser_stop(&server_browser);
     multiplayer_disconnect(&multiplayer);
     map_free();
+    /* Меши и текстуры моделей освобождаем, пока контекст OpenGL ещё жив. */
+    prefab_shutdown();
     font_destroy(font);
     render_shutdown(&renderer);
     win_shutdown(&window);

@@ -24,8 +24,8 @@ Map g_map = {0};
 static char map_base_dir[TEXPOOL_PATH_MAX];
 
 void map_init(void) {
-    free(g_map.cubes);
-    g_map.cubes = NULL;
+    free(g_map.objects);
+    g_map.objects = NULL;
     g_map.count = 0;
     g_map.capacity = 0;
     g_map.is_loaded = 0;
@@ -44,18 +44,18 @@ int map_is_custom(void) {
     return g_map.is_loaded;
 }
 
-static int map_add_cube(const MapCube *cube) {
+static int map_add_object(const MapObject *object) {
     if (g_map.count >= g_map.capacity) {
         size_t new_cap = (g_map.capacity == 0) ? 16 : g_map.capacity * 2;
-        MapCube *new_cubes = realloc(g_map.cubes, new_cap * sizeof(MapCube));
-        if (!new_cubes) {
+        MapObject *grown = realloc(g_map.objects, new_cap * sizeof(MapObject));
+        if (!grown) {
             return 0;
         }
-        g_map.cubes = new_cubes;
+        g_map.objects = grown;
         g_map.capacity = new_cap;
     }
 
-    g_map.cubes[g_map.count++] = *cube;
+    g_map.objects[g_map.count++] = *object;
     return 1;
 }
 
@@ -253,58 +253,95 @@ static void apply_directive(char *tokens[], int count, int line_num, MapDefaults
     fprintf(stderr, "Warning: line %d: unknown directive '%s'\n", line_num, key);
 }
 
-/* ---------- Строка куба ----------
- * x y z sx sy sz [tex=<файл>] [tile=<метры>] [repeat|stretch]
- * Текстуру можно задать и просто путём без ключа — сразу после размеров.
+/* ---------- Строка объекта ----------
+ * <префаб> x y z sx sy sz [tex=<файл>] [tile=<метры>] [repeat|stretch]
+ *
+ * Первый токен — имя префаба (модели): "cube" — встроенный куб, любое
+ * другое имя ищется как .emf (см. prefab_get). Числа начинаются со
+ * второго токена; текстуру можно задать и просто путём без ключа — сразу
+ * после размеров.
+ *
  * Возвращает 0 только при нехватке памяти. */
 
-static int parse_cube(char *tokens[], int count, int line_num, const MapDefaults *def) {
-    if (count < 6) {
+static int is_directive(const char *key) {
+    return strcmp(key, "texture") == 0 || strcmp(key, "tex") == 0
+        || strcmp(key, "tile") == 0
+        || strcmp(key, "repeat") == 0 || strcmp(key, "stretch") == 0;
+}
+
+/* Общая часть строки объекта: numbers — индекс первого числа (1 в новом
+ * формате, 0 в старом без имени префаба). */
+static int add_object(const Prefab *prefab, char *tokens[], int numbers,
+                      int count, int line_num, const MapDefaults *def) {
+    if (numbers + 6 > count) {
         fprintf(stderr, "Warning: line %d: expected 'x y z sx sy sz', only %d values given\n",
-                line_num, count);
+                line_num, count - numbers);
         return 1;
     }
 
     float v[6];
     for (int i = 0; i < 6; i++) {
-        if (!token_is_number(tokens[i], &v[i])) {
+        if (!token_is_number(tokens[numbers + i], &v[i])) {
             fprintf(stderr, "Warning: line %d: expected 'x y z sx sy sz', got '%s'\n",
-                    line_num, tokens[i]);
+                    line_num, tokens[numbers + i]);
             return 1;
         }
     }
 
-    MapCube cube;
-    cube.x = v[0];  cube.y = v[1];  cube.z = v[2];
-    cube.sx = v[3]; cube.sy = v[4]; cube.sz = v[5];
-    cube.texture = def->texture;
-    cube.tile = def->tile;
-    cube.uv = def->uv;
+    MapObject object;
+    object.x = v[0];  object.y = v[1];  object.z = v[2];
+    object.sx = v[3]; object.sy = v[4]; object.sz = v[5];
+    object.prefab = prefab;
 
-    for (int i = 6; i < count; i++) {
+    /* У куба текстура по умолчанию — из директив карты, у модели — её
+     * собственная из .emf. tex=... перекрывает и то и другое. */
+    const int is_cube = !prefab || prefab->builtin_cube;
+    object.texture = is_cube ? def->texture : prefab->texture;
+    object.tile = def->tile;
+    object.uv = def->uv;
+
+    for (int i = numbers + 6; i < count; i++) {
         const char *token = tokens[i];
         const char *value;
 
         if ((value = option_value(token, "tex")) || (value = option_value(token, "texture"))) {
-            set_texture(&cube.texture, value, line_num);
+            set_texture(&object.texture, value, line_num);
         } else if ((value = option_value(token, "tile"))) {
-            if (!parse_tile(value, &cube.tile)) {
+            if (!parse_tile(value, &object.tile)) {
                 fprintf(stderr, "Warning: line %d: 'tile=' expects a size in meters, got '%s'\n",
                         line_num, value);
             }
         } else if (strcmp(token, "stretch") == 0) {
-            cube.uv = MAP_UV_STRETCH;
+            object.uv = MAP_UV_STRETCH;
         } else if (strcmp(token, "repeat") == 0) {
-            cube.uv = MAP_UV_TILE;
+            object.uv = MAP_UV_TILE;
         } else if (strchr(token, '=') == NULL) {
-            /* путь без ключа: 0 0 0 2 2 2 brick.raw */
-            set_texture(&cube.texture, token, line_num);
+            /* путь без ключа: cube 0 0 0 2 2 2 brick.raw */
+            set_texture(&object.texture, token, line_num);
         } else {
-            fprintf(stderr, "Warning: line %d: unknown cube option '%s'\n", line_num, token);
+            fprintf(stderr, "Warning: line %d: unknown object option '%s'\n", line_num, token);
         }
     }
 
-    return map_add_cube(&cube);
+    return map_add_object(&object);
+}
+
+/* Строка нового формата: имя префаба, затем размеры и опции. */
+static int parse_object(char *tokens[], int count, int line_num, const MapDefaults *def) {
+    if (count < 7) {
+        fprintf(stderr,
+                "Warning: line %d: expected '<prefab> x y z sx sy sz', only %d values given\n",
+                line_num, count);
+        return 1;
+    }
+
+    const Prefab *prefab = prefab_get(tokens[0], map_base_dir);
+    if (!prefab) {
+        /* Причина уже напечатана загрузчиком префабов. */
+        return 1;
+    }
+
+    return add_object(prefab, tokens, 1, count, line_num, def);
 }
 
 int map_load(const char *filename) {
@@ -326,7 +363,7 @@ int map_load(const char *filename) {
 
     char line[MAP_LINE_MAX];
     int line_num = 0;
-    int loaded_count = 0;
+    int legacy_warned = 0;
 
     while (fgets(line, sizeof(line), f)) {
         line_num++;
@@ -344,47 +381,67 @@ int map_load(const char *filename) {
             continue;
         }
 
-        /* Строка куба начинается с числа, остальные строки — директивы. */
-        float first;
-        if (!token_is_number(tokens[0], &first)) {
+        /* Директивы начинаются с ключевого слова; всё остальное — строка
+         * объекта, и первым в ней идёт имя префаба. */
+        if (is_directive(tokens[0])) {
             apply_directive(tokens, count, line_num, &def);
             continue;
         }
 
-        if (!parse_cube(tokens, count, line_num, &def)) {
+        float legacy;
+        int ok;
+        if (token_is_number(tokens[0], &legacy)) {
+            /* Старая карта: строка начинается сразу с координат, без имени
+             * префаба. Читаем её как встроенный куб, чтобы карты не
+             * перестали открываться. */
+            if (!legacy_warned) {
+                fprintf(stderr,
+                        "Warning: line %d: object lines now start with a prefab "
+                        "name ('cube x y z sx sy sz'); lines starting with a "
+                        "number are read as '%s'\n",
+                        line_num, PREFAB_BUILTIN_CUBE);
+                legacy_warned = 1;
+            }
+            const Prefab *cube = prefab_get(PREFAB_BUILTIN_CUBE, map_base_dir);
+            ok = add_object(cube, tokens, 0, count, line_num, &def);
+        } else {
+            ok = parse_object(tokens, count, line_num, &def);
+        }
+
+        if (!ok) {
             fprintf(stderr, "Error: out of memory reading map file at line %d\n", line_num);
             fclose(f);
             map_free();
             return 0;
         }
-        loaded_count++;
     }
 
     fclose(f);
 
-    printf("Loaded map '%s': %d cubes, %d textures\n",
-           filename, loaded_count, (int)texpool_count(&g_map.textures));
+    printf("Loaded map '%s': %d objects, %d textures, %d prefabs\n",
+           filename, (int)g_map.count, (int)texpool_count(&g_map.textures),
+           prefab_count());
     g_map.is_loaded = 1;
     return 1;
 }
 
 /* ---------- Границы и геометрия ---------- */
 
-/* Границы куба по осям. Размеры в карте могут быть отрицательными
- * (куб «растёт» в другую сторону), поэтому min/max упорядочиваются. */
+/* Границы объекта по осям. Размеры в карте могут быть отрицательными
+ * (объект «растёт» в другую сторону), поэтому min/max упорядочиваются. */
 typedef struct {
     float min_x, max_x;
     float min_y, max_y;
     float min_z, max_z;
-} CubeBounds;
+} MapBounds;
 
 static void ordered(float a, float b, float *lo, float *hi) {
     *lo = (a < b) ? a : b;
     *hi = (a < b) ? b : a;
 }
 
-static CubeBounds cube_bounds(const MapCube *c) {
-    CubeBounds b;
+static MapBounds object_bounds(const MapObject *c) {
+    MapBounds b;
     ordered(c->x, c->x + c->sx, &b.min_x, &b.max_x);
     ordered(c->y, c->y + c->sy, &b.min_y, &b.max_y);
     ordered(c->z, c->z + c->sz, &b.min_z, &b.max_z);
@@ -415,8 +472,8 @@ static int calc_subdiv(float len) {
     return n;
 }
 
-static void draw_cube(const MapCube *c, const Texture *tex) {
-    CubeBounds b = cube_bounds(c);
+static void draw_cube(const MapObject *c, const Texture *tex) {
+    MapBounds b = object_bounds(c);
     float x0 = b.min_x;
     float x1 = b.max_x;
     float y0 = b.min_y;
@@ -585,12 +642,63 @@ static void draw_cube(const MapCube *c, const Texture *tex) {
     glEnd();
 }
 
+/* Отрисовка модели из .emf.
+ *
+ * Меш задан в своих координатах, а объект карты — это AABB x..x+sx и так
+ * далее. Поэтому габариты меша растягиваются ровно на размеры объекта:
+ * sx, sy, sz означают «сколько метров модель занимает в мире», как и у
+ * куба, независимо от единиц, в которых нарисована сама модель.
+ * UV берутся из файла модели, поэтому tile/repeat/stretch к ней не
+ * применяются. Текстура уже привязана вызывающим кодом. */
+static void draw_model(const MapObject *object, const Prefab *prefab) {
+    const EmfMesh *mesh = &prefab->mesh;
+    if (!mesh->points || !mesh->indices || mesh->num_indices == 0) return;
+
+    MapBounds b = object_bounds(object);
+    const float len_x = b.max_x - b.min_x;
+    const float len_y = b.max_y - b.min_y;
+    const float len_z = b.max_z - b.min_z;
+    if (len_x <= 0.0f || len_y <= 0.0f || len_z <= 0.0f) return;
+
+    /* У плоской модели (лист, панель) габарит по оси может быть нулевым:
+     * делим на единицу, иначе масштаб был бы бесконечным. */
+    const float base_x = (prefab->max_x - prefab->min_x > 0.0f)
+                       ? (prefab->max_x - prefab->min_x) : 1.0f;
+    const float base_y = (prefab->max_y - prefab->min_y > 0.0f)
+                       ? (prefab->max_y - prefab->min_y) : 1.0f;
+    const float base_z = (prefab->max_z - prefab->min_z > 0.0f)
+                       ? (prefab->max_z - prefab->min_z) : 1.0f;
+
+    const float scale_x = len_x / base_x;
+    const float scale_y = len_y / base_y;
+    const float scale_z = len_z / base_z;
+
+    glBegin(GL_TRIANGLES);
+    for (uint32_t i = 0; i < mesh->num_indices; i++) {
+        const uint32_t v = mesh->indices[i];
+        const float u = mesh->uvs ? mesh->uvs[v * 2 + 0] : 0.0f;
+        const float w = mesh->uvs ? mesh->uvs[v * 2 + 1] : 0.0f;
+
+        glTexCoord2f(u, w);
+        glVertex3f(b.min_x + (mesh->points[v * 3 + 0] - prefab->min_x) * scale_x,
+                   b.min_y + (mesh->points[v * 3 + 1] - prefab->min_y) * scale_y,
+                   b.min_z + (mesh->points[v * 3 + 2] - prefab->min_z) * scale_z);
+    }
+    glEnd();
+}
+
 void map_render(const Texture *fallback) {
     GLuint bound = 0;   /* текстура, привязанная прямо сейчас */
 
     for (size_t i = 0; i < g_map.count; i++) {
-        const MapCube *cube = &g_map.cubes[i];
-        const Texture *tex = cube->texture ? cube->texture : fallback;
+        const MapObject *object = &g_map.objects[i];
+        const Prefab *prefab = object->prefab;
+        const int is_cube = !prefab || prefab->builtin_cube;
+
+        /* Своя текстура объекта, затем текстура модели, затем общая. */
+        const Texture *tex = object->texture;
+        if (!tex && prefab) tex = prefab->texture;
+        if (!tex) tex = fallback;
         if (!tex) continue;
 
         /* Переключаем текстуру только когда она правда другая: у карты
@@ -600,7 +708,11 @@ void map_render(const Texture *fallback) {
             bound = tex->id;
         }
 
-        draw_cube(cube, tex);
+        if (is_cube) {
+            draw_cube(object, tex);
+        } else {
+            draw_model(object, prefab);
+        }
     }
 }
 
@@ -613,7 +725,7 @@ static float clampf(float v, float min, float max) {
 }
 
 /* Квадрат расстояния по горизонтали от точки до «следа» куба (0 — внутри). */
-static float footprint_dist_sq(const CubeBounds *b, float x, float z) {
+static float footprint_dist_sq(const MapBounds *b, float x, float z) {
     float dx = x - clampf(x, b->min_x, b->max_x);
     float dz = z - clampf(z, b->min_z, b->max_z);
     return dx * dx + dz * dz;
@@ -621,7 +733,7 @@ static float footprint_dist_sq(const CubeBounds *b, float x, float z) {
 
 /* Стена, если тело игрока пересекает куб по высоте и куб выше шага
  * или нависает над ногами. */
-static int blocks_body(const CubeBounds *b, float feet_y) {
+static int blocks_body(const MapBounds *b, float feet_y) {
     int overlaps = feet_y + COLL_HEIGHT > b->min_y + COLL_EPSILON
                 && feet_y < b->max_y - COLL_EPSILON;
     int too_high = b->max_y - feet_y > COLL_STEP_HEIGHT
@@ -639,7 +751,7 @@ int map_point_blocked(float px, float pz, float bottom_y) {
     }
 
     for (size_t i = 0; i < g_map.count; i++) {
-        CubeBounds b = cube_bounds(&g_map.cubes[i]);
+        MapBounds b = object_bounds(&g_map.objects[i]);
         int inside = px >= b.min_x && px <= b.max_x && pz >= b.min_z && pz <= b.max_z;
         if (inside && blocks_body(&b, bottom_y)) return 1;
     }
@@ -663,7 +775,7 @@ int map_capsule_blocked(float cx, float cz, float feet_y) {
     }
 
     for (size_t i = 0; i < g_map.count; i++) {
-        CubeBounds b = cube_bounds(&g_map.cubes[i]);
+        MapBounds b = object_bounds(&g_map.objects[i]);
         if (footprint_dist_sq(&b, cx, cz) < COLL_RADIUS * COLL_RADIUS) {
             if (blocks_body(&b, feet_y) || blocks_body(&b, eff_feet)) {
                 return 1;
@@ -682,7 +794,7 @@ float map_cylinder_ground_height(float cx, float cz, float radius, float current
     int found = 0;
 
     for (size_t i = 0; i < g_map.count; i++) {
-        CubeBounds b = cube_bounds(&g_map.cubes[i]);
+        MapBounds b = object_bounds(&g_map.objects[i]);
         if (footprint_dist_sq(&b, cx, cz) <= radius * radius
             && b.max_y <= max_ground) {
             if (!found || b.max_y > highest) {
@@ -706,7 +818,7 @@ float map_cylinder_ceiling_height(float cx, float cz, float radius, float curren
     float lowest = INFINITY;
 
     for (size_t i = 0; i < g_map.count; i++) {
-        CubeBounds b = cube_bounds(&g_map.cubes[i]);
+        MapBounds b = object_bounds(&g_map.objects[i]);
         if (footprint_dist_sq(&b, cx, cz) <= radius * radius
             && b.min_y >= min_ceiling && b.min_y < lowest) {
             lowest = b.min_y;
