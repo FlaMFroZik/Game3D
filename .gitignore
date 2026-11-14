@@ -9,3 +9,6 @@ game3d.exe
 *.o
 *.d
 *.raw
+
+# Текстуры моделей в assets/models — часть репозитория, а не артефакт сборки.
+!assets/models/*.raw
