@@ -6,6 +6,8 @@
 
 #include "network/multiplayer.h"
 
+#include "model/emf.h"
+#include <stdlib.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,6 +42,10 @@
 #define MP_PACKET_TRANSFORM  3u
 #define MP_PACKET_PLAYERS    4u
 #define MP_PACKET_LEAVE      5u
+#define MP_PACKET_MODEL      6u
+#define MP_MODEL_CHUNK       1024u
+#define MP_MODEL_SIZE_MAX    (1024u * 1024u)
+#define MP_MODEL_COUNT_MAX   16u
 
 static void set_status(MultiplayerClient *client, const char *text) {
     snprintf(client->status, sizeof client->status, "%s", text);
@@ -400,6 +406,71 @@ static void receive_visible_players(MultiplayerClient *client,
     client->remote_player_count = count;
 }
 
+/* Имена файлов задаёт клиент. Режим x не перезаписывает существующие файлы. */
+static void save_model(MultiplayerClient *client) {
+    char path[64];
+    snprintf(path, sizeof path, "server-model-%u-%u.emf",
+             (unsigned)client->player_id, (unsigned)client->model_index);
+    FILE *f = fopen(path, "wbx");
+    if (!f) { perror(path); return; }
+    int ok = fwrite(client->model_data, 1, client->model_size, f) == client->model_size;
+    if (fclose(f) != 0) ok = 0;
+    EmfMesh mesh;
+    if (ok && emf_load(path, &mesh)) {
+        emf_free(&mesh);
+        printf("Downloaded model: %s\n", path);
+    } else {
+        remove(path);
+        fprintf(stderr, "Invalid or incomplete model: %s\n", path);
+    }
+}
+
+static void receive_model(MultiplayerClient *c, const unsigned char *p, size_t n) {
+    if (c->state != MULTIPLAYER_READY || c->models_done || !c->model_attempts ||
+        n < 17 || read_u32_be(p+1) != c->player_id ||
+        read_u32_be(p+5) != c->model_index || read_u32_be(p+9) != c->model_offset) return;
+    uint32_t size = read_u32_be(p+13);
+    if (!size && n == 17 && !c->model_offset) { c->models_done = 1; return; }
+    if (size > MP_MODEL_SIZE_MAX || size <= c->model_offset ||
+        (c->model_data && c->model_size != size)) return;
+    uint32_t chunk = size - c->model_offset;
+    if (chunk > MP_MODEL_CHUNK) chunk = MP_MODEL_CHUNK;
+    if (n != 17 + chunk) return;
+    if (!c->model_data) {
+        c->model_data = malloc(size);
+        if (!c->model_data) { c->models_done = 1; return; }
+        c->model_size = size;
+    }
+    memcpy(c->model_data + c->model_offset, p+17, chunk);
+    c->model_offset += chunk;
+    c->model_attempts = 0;
+    c->next_model_request_at = 0;
+    if (c->model_offset == size) {
+        save_model(c);
+        free(c->model_data);
+        c->model_data = NULL;
+        c->model_offset = 0;
+        if (++c->model_index == MP_MODEL_COUNT_MAX) c->models_done = 1;
+    }
+}
+
+static void request_model_chunk(MultiplayerClient *c, double now) {
+    if (c->models_done || now < c->next_model_request_at) return;
+    if (c->model_attempts >= MP_MAX_ATTEMPTS) {
+        free(c->model_data);
+        c->model_data = NULL;
+        c->models_done = 1;
+        return;
+    }
+    unsigned char packet[13] = {MP_PACKET_MODEL};
+    write_u32_be(packet+1, c->player_id);
+    write_u32_be(packet+5, c->model_index);
+    write_u32_be(packet+9, c->model_offset);
+    (void)send_packet(c, packet, sizeof packet);
+    c->model_attempts++;
+    c->next_model_request_at = now + MP_RETRY_SECONDS;
+}
+
 static void receive_packet(MultiplayerClient *client, const unsigned char *packet,
                            size_t length, double now) {
     if (length == 0) return;
@@ -414,6 +485,9 @@ static void receive_packet(MultiplayerClient *client, const unsigned char *packe
             if (client->state == MULTIPLAYER_WAIT_JOIN) {
                 receive_join(client, packet, length);
             }
+            break;
+        case MP_PACKET_MODEL:
+            receive_model(client, packet, length);
             break;
         case MP_PACKET_PLAYERS:
             if (client->joined) receive_visible_players(client, packet, length);
@@ -490,6 +564,8 @@ void multiplayer_update(MultiplayerClient *client, double now) {
         receive_packet(client, packet, (size_t)received, now);
     }
 
+    if (client->state == MULTIPLAYER_READY) request_model_chunk(client, now);
+
     if (client->state != MULTIPLAYER_WAIT_INFO &&
         client->state != MULTIPLAYER_WAIT_JOIN) {
         return;
@@ -550,6 +626,11 @@ void multiplayer_disconnect(MultiplayerClient *client) {
         (void)send_packet(client, packet, sizeof packet);
     }
     close_socket(client);
+    free(client->model_data);
+    client->model_data = NULL;
+    client->model_index = client->model_offset = client->model_size = 0;
+    client->model_attempts = client->models_done = 0;
+    client->next_model_request_at = 0;
     client->joined = 0;
     client->player_id = 0;
     client->remote_player_count = 0;
