@@ -57,6 +57,12 @@ typedef struct {
     MultiplayerRemotePlayer remote_players[MULTIPLAYER_MAX_REMOTE_PLAYERS];
     int remote_player_count;
 
+    /* Последовательная загрузка EMF пакетами [6]. */
+    unsigned char *model_data;
+    uint32_t model_index, model_offset, model_size;
+    int model_attempts, models_done;
+    double next_model_request_at;
+
     double last_request_at;
     int request_attempts;
     double next_players_request_at;
